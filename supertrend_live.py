@@ -14,7 +14,7 @@ from colorama import Fore, Style, Back
 colorama.init(autoreset=True)
 import warnings
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
-warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=FutureWarning) 
 import concurrent.futures
 from tqdm import tqdm
 import prettytable
@@ -48,8 +48,8 @@ def fetch_ohlcv_data(args):
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         return (symbol, tf), df
-    except Exception as e:
-        print(f"Error fetching {symbol} {tf}: {e}")
+    except Exception:
+        logger.exception(f"Error fetching {symbol} {tf}")
         return (symbol, tf), None
 
 class EnhancedSuperTrend:
@@ -60,8 +60,12 @@ class EnhancedSuperTrend:
         self.exchange = self.setup_exchange()
         # Fetch all testnet swap pairs dynamically
         print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Fetching all Bitget USDT-margined swap pairs from testnet...{Style.RESET_ALL}")
-        markets = self.exchange.load_markets()
-        testnet_symbols = [s for s, m in markets.items() if m.get('swap') and m.get('quote') == 'USDT']
+        try:
+            markets = self.exchange.load_markets()
+            testnet_symbols = [s for s, m in markets.items() if m.get('swap') and m.get('quote') == 'USDT']
+        except Exception as e:
+            logger.exception(f"Could not load markets from testnet: {e}. Using config symbols.")
+            testnet_symbols = self.config.get('symbols', [])
         self.config['symbols'] = testnet_symbols
         print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Scanning {len(testnet_symbols)} testnet pairs: {testnet_symbols[:10]}... (+{len(testnet_symbols)-10} more){Style.RESET_ALL}")
         if self.config.get('testnet', {}).get('use_sandbox', True):
@@ -675,8 +679,9 @@ async def main():
     try:
         strategy = EnhancedSuperTrend()
         await strategy.run_strategy()
-    except Exception as e:
-        logger.error(f"Main error: {e}")
+    except Exception:
+        logger.exception("Main error")
 
 if __name__ == "__main__":
     asyncio.run(main())
+ 
