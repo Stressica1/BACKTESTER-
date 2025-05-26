@@ -1,0 +1,5 @@
+{
+  "symbols": ["BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "XRP/USDT", "SOL/USDT", "DOT/USDT", "MATIC/USDT", "AVAX/USDT", "LINK/USDT"],
+  "timeframes": ["5m", "15m"],
+  "use_optimization": true
+}

@@ -1,0 +1,46 @@
+{
+  "BTC/USDT:USDT": {
+    "statistics": {},
+    "signal_count": 1,
+    "pullback_count": 0
+  },
+  "ETH/USDT:USDT": {
+    "statistics": {},
+    "signal_count": 2,
+    "pullback_count": 0
+  },
+  "ADA/USDT:USDT": {
+    "statistics": {
+      "total_signals": 1,
+      "pullback_frequency": 1.0,
+      "average_pullback_percentage": 10.969352378310909,
+      "median_pullback_percentage": 10.969352378310909,
+      "max_pullback_percentage": 10.969352378310909,
+      "average_red_vhma_duration": 12.0,
+      "recovery_rate": 0.0,
+      "long_signals": 1,
+      "short_signals": 0,
+      "long_avg_pullback": 10.969352378310909,
+      "long_recovery_rate": 0.0
+    },
+    "signal_count": 1,
+    "pullback_count": 1
+  },
+  "SOL/USDT:USDT": {
+    "statistics": {
+      "total_signals": 1,
+      "pullback_frequency": 1.0,
+      "average_pullback_percentage": 5.579959964412804,
+      "median_pullback_percentage": 5.579959964412804,
+      "max_pullback_percentage": 5.579959964412804,
+      "average_red_vhma_duration": 16.0,
+      "recovery_rate": 1.0,
+      "long_signals": 0,
+      "short_signals": 1,
+      "short_avg_pullback": 5.579959964412804,
+      "short_recovery_rate": 1.0
+    },
+    "signal_count": 1,
+    "pullback_count": 1
+  }
+}

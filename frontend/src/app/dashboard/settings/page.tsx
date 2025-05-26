@@ -35,8 +35,8 @@ interface UserSettings {
     position_sizing_method: 'fixed' | 'percentage' | 'risk_based';
   };
   api: {
-    binance_enabled: boolean;
-    binance_api_key: string;
+    bitget_enabled: boolean;
+    bitget_api_key: string;
     coinbase_enabled: boolean;
     coinbase_api_key: string;
     ftx_enabled: boolean;
@@ -467,28 +467,28 @@ export default function SettingsPage() {
                 </div>
 
                 <div className="space-y-6">
-                  {/* Binance */}
+                  {/* Bitget */}
                   <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center space-x-3">
                         <div className="w-8 h-8 bg-yellow-500 rounded-full flex items-center justify-center text-white font-bold">
-                          B
+                          BG
                         </div>
                         <div>
-                          <h4 className="font-medium text-gray-900 dark:text-gray-100">Binance</h4>
+                          <h4 className="font-medium text-gray-900 dark:text-gray-100">Bitget</h4>
                           <p className="text-sm text-gray-500 dark:text-gray-500">
-                            Connect your Binance account for live trading
+                            Connect your Bitget account for live trading
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-3">
-                        <Badge variant={settings?.api.binance_enabled ? 'success' : 'default'}>
-                          {settings?.api.binance_enabled ? 'Connected' : 'Disconnected'}
+                        <Badge variant={settings?.api.bitget_enabled ? 'success' : 'default'}>
+                          {settings?.api.bitget_enabled ? 'Connected' : 'Disconnected'}
                         </Badge>
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => testApiMutation.mutate('binance')}
+                          onClick={() => testApiMutation.mutate('bitget')}
                         >
                           Test
                         </Button>
@@ -503,9 +503,9 @@ export default function SettingsPage() {
                           </label>
                           <Input
                             type="password"
-                            placeholder="Enter Binance API Key"
-                            value={settings?.api.binance_api_key || ''}
-                            onChange={(e) => handleSettingChange('api', 'binance_api_key', e.target.value)}
+                            placeholder="Enter Bitget API Key"
+                            value={settings?.api.bitget_api_key || ''}
+                            onChange={(e) => handleSettingChange('api', 'bitget_api_key', e.target.value)}
                           />
                         </div>
                         <div>
@@ -514,7 +514,7 @@ export default function SettingsPage() {
                           </label>
                           <Input
                             type="password"
-                            placeholder="Enter Secret Key"
+                            placeholder="Enter Bitget Secret Key"
                           />
                         </div>
                       </div>

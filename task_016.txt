@@ -1,0 +1,11 @@
+# Task ID: 16
+# Title: Integrate monitoring and auto-reload
+# Status: pending
+# Dependencies: None
+# Priority: low
+# Description: Add file watcher to reload strategy code on changes and integrate centralized monitoring and logging dashboards.
+# Details:
+Use `watchdog` or uvicorn reload, configure WebSocket dashboard server to auto-refresh, and centralize logs with timestamped files.
+
+# Test Strategy:
+Modify a core strategy file during runtime and verify the server reloads without losing active connections and logs errors.

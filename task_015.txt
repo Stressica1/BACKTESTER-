@@ -1,0 +1,11 @@
+# Task ID: 15
+# Title: Enable live trading on Bitget testnet
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Configure and verify live trading functionality using Bitget testnet with paper trading mode.
+# Details:
+Centralize exchange configuration in `config.py`, add paper live toggle, implement robust error handling, retry logic, and rate limiting for order placement.
+
+# Test Strategy:
+Execute a test paper trade on Bitget testnet and confirm proper order simulation and dashboard updates.

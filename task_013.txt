@@ -1,0 +1,11 @@
+# Task ID: 13
+# Title: Unify trading modules
+# Status: pending
+# Dependencies: None
+# Priority: medium
+# Description: Consolidate all trading scripts into a single modular package under `strategies/`
+# Details:
+Merge `supertrend_live.py`, `super_z_pullback_analyzer.py`, `super_z_optimized.py`, and `launch_supertrend.py` into a cohesive `strategies/` package with clear submodules for indicators, execution, and dashboard.
+
+# Test Strategy:
+Run the unified strategy end-to-end on Bitget testnet to ensure functionality and correct module imports.

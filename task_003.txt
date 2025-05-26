@@ -1,0 +1,11 @@
+# Task ID: 3
+# Title: Enhance Backtesting Engine Core
+# Status: pending
+# Dependencies: None
+# Priority: medium
+# Description: Implement essential technical indicators, support multiple timeframes, and develop basic strategy evaluation functionality.
+# Details:
+This task focuses on enhancing the backtest_engine.py module to support a comprehensive set of technical indicators (RSI, MACD, Bollinger Bands, etc.), enable multi-timeframe backtesting, and implement core strategy evaluation functionality. The goal is to create a robust foundation for strategy testing that can be extended with optimization features in later tasks.
+
+# Test Strategy:
+

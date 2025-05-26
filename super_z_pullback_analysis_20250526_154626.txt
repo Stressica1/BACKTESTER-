@@ -1,0 +1,45 @@
+================================================================================
+SUPER Z STRATEGY PULLBACK ANALYSIS REPORT
+================================================================================
+
+OVERALL SUMMARY:
+- Analyzed symbols: 4
+- Total signals found: 5
+- Total pullback events: 2
+
+SYMBOL: ADA/USDT:USDT
+----------------------------------------
+Total signals: 1
+Pullback frequency: 100.0%
+Average pullback: 10.97%
+Median pullback: 10.97%
+Max pullback: 10.97%
+Average red VHMA duration: 12.0 candles
+Recovery rate: 0.0%
+Long signals avg pullback: 10.97%
+Long signals recovery rate: 0.0%
+
+SYMBOL: SOL/USDT:USDT
+----------------------------------------
+Total signals: 1
+Pullback frequency: 100.0%
+Average pullback: 5.58%
+Median pullback: 5.58%
+Max pullback: 5.58%
+Average red VHMA duration: 16.0 candles
+Recovery rate: 100.0%
+Short signals avg pullback: 5.58%
+Short signals recovery rate: 100.0%
+
+KEY INSIGHTS:
+----------------------------------------
+✓ PULLBACK PATTERN CONFIRMED: 2 events analyzed
+✓ Average pullback after signal: 8.27%
+✓ Average recovery rate: 50.0%
+✓ Average time spent in red VHMA: 14.0 candles
+⚠️  SIGNIFICANT PULLBACK PATTERN DETECTED
+   - Consider waiting for pullback completion before entry
+   - Set wider stop losses to account for 8.3% average pullback
+📊 Pattern consistency: moderate
+
+================================================================================

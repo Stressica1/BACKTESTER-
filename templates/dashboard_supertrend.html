@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SuperTrend Enhanced Strategy Dashboard</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <style>
+        :root {
+            --primary-color: #6c7ae0;
+            --secondary-color: #4b59d3;
+            --accent-color: #2e36b5;
+            --success-color: #28a745;
+            --danger-color: #dc3545;
+            --warning-color: #ffc107;
+            --info-color: #17a2b8;
+            --dark-bg: #121212;
+            --card-bg: #1e1e1e;
+            --card-border: #333;
+            --text-primary: #e1e1e1;
+            --text-secondary: #a0a0a0;
+        }
+
+        body {
+            background-color: var(--dark-bg);
+            color: var(--text-primary);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .navbar {
+            background-color: var(--card-bg);
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1.5rem;
+        }
+
+        .card-header {
+            border-bottom: 1px solid var(--card-border);
+            font-weight: 600;
+            padding: 1rem;
+        }
+
+        .bg-running {
+            background-color: rgba(40, 167, 69, 0.2);
+            border-left: 4px solid var(--success-color);
+        }
+
+        .bg-stopped {
+            background-color: rgba(220, 53, 69, 0.2);
+            border-left: 4px solid var(--danger-color);
+        }
+
+        .bg-idle {
+            background-color: rgba(255, 193, 7, 0.2);
+            border-left: 4px solid var(--warning-color);
+        }
+
+        .signal-buy {
+            background-color: rgba(40, 167, 69, 0.1);
+            border-left: 4px solid var(--success-color);
+        }
+
+        .signal-sell {
+            background-color: rgba(220, 53, 69, 0.1);
+            border-left: 4px solid var(--danger-color);
+        }
+
+        .signal-error {
+            background-color: rgba(255, 193, 7, 0.1);
+            border-left: 4px solid var(--warning-color);
+        }
+
+        .table {
+            color: var(--text-primary);
+        }
+
+        .table thead th {
+            border-bottom: 1px solid var(--card-border);
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .table td, .table th {
+            border-top: 1px solid var(--card-border);
+            padding: 0.75rem;
+        }
+
+        .table-hover tbody tr:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .badge {
+            font-weight: 500;
+            padding: 0.35em 0.65em;
+        }
+
+        .text-positive {
+            color: var(--success-color);
+        }
+
+        .text-negative {
+            color: var(--danger-color);
+        }
+
+        .ws-status {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+
+        .ws-connected {
+            background-color: var(--success-color);
+        }
+
+        .ws-connecting {
+            background-color: var(--warning-color);
+        }
+
+        .ws-disconnected {
+            background-color: var(--danger-color);
+        }
+
+        .progress {
+            background-color: var(--card-border);
+            height: 8px;
+            margin-top: 5px;
+        }
+
+        .progress-bar {
+            background-color: var(--primary-color);
+        }
+
+        .heartbeat {
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+            100% { transform: scale(1); }
+        }
+
+        .chart-container {
+            height: 300px;
+            width: 100%;
+            position: relative;
+        }
+
+        .signal-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .position-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="#">
+                <i class="bi bi-activity text-primary me-2"></i>
+                SuperTrend Enhanced Dashboard
+            </a>
+            <div class="d-flex align-items-center">
+                <div class="me-3">
+                    <span id="ws-indicator" class="ws-status ws-disconnected"></span>
+                    <span id="ws-status-text">Disconnected</span>
+                </div>
+                <button id="start-btn" class="btn btn-success btn-sm me-2">
+                    <i class="bi bi-play-fill"></i> Start
+                </button>
+                <button id="stop-btn" class="btn btn-danger btn-sm me-2">
+                    <i class="bi bi-stop-fill"></i> Stop
+                </button>
+                <button id="refresh-btn" class="btn btn-primary btn-sm">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <div class="row">
+            <!-- Status Card -->
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <span>Strategy Status</span>
+                        <span id="status-badge" class="badge bg-warning">Idle</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="status-details" class="bg-idle p-3 rounded">
+                            <h5 class="mb-3"><i class="bi bi-info-circle me-2"></i> Strategy Information</h5>
+                            <div class="mb-2">
+                                <strong>Active Symbols:</strong> <span id="active-symbols-count">0</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>Timeframe:</strong> <span id="timeframe">4h</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>SuperTrend Length:</strong> <span id="st-length">50</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>SuperTrend Multiplier:</strong> <span id="st-multiplier">1.0</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>RSI Filter:</strong> <span id="rsi-filter">Enabled</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>Volume Filter:</strong> <span id="volume-filter">Enabled</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>Trading Mode:</strong> <span id="trading-mode" class="badge bg-warning">Testnet</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>Last Update:</strong> <span id="last-update">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Performance Card -->
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-graph-up me-2"></i> Performance
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <div class="d-flex flex-column">
+                                    <span class="text-secondary">Total Profit</span>
+                                    <span id="total-profit" class="fs-4 text-positive">$0.00</span>
+                                </div>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <div class="d-flex flex-column">
+                                    <span class="text-secondary">Win Rate</span>
+                                    <span id="win-rate" class="fs-4">0%</span>
+                                </div>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <div class="d-flex flex-column">
+                                    <span class="text-secondary">Total Trades</span>
+                                    <span id="total-trades" class="fs-4">0</span>
+                                </div>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <div class="d-flex flex-column">
+                                    <span class="text-secondary">Profit Factor</span>
+                                    <span id="profit-factor" class="fs-4">0.00</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div>
+                            <span class="text-secondary d-block mb-1">Win/Loss Ratio</span>
+                            <div class="d-flex justify-content-between mb-1">
+                                <small id="winning-trades">0 Wins</small>
+                                <small id="losing-trades">0 Losses</small>
+                            </div>
+                            <div class="progress">
+                                <div id="win-progress" class="progress-bar bg-success" role="progressbar" style="width: 0%"></div>
+                                <div id="loss-progress" class="progress-bar bg-danger" role="progressbar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Positions -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-currency-exchange me-2"></i> Active Positions</span>
+                        <span id="positions-count" class="badge bg-primary">0</span>
+                    </div>
+                    <div class="card-body position-list">
+                        <table class="table table-hover" id="positions-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Side</th>
+                                    <th>Entry Price</th>
+                                    <th>Current Price</th>
+                                    <th>P&L</th>
+                                    <th>P&L %</th>
+                                    <th>Time</th>
+                                </tr>
+                            </thead>
+                            <tbody id="positions-body">
+                                <tr>
+                                    <td colspan="7" class="text-center">No active positions</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <!-- Signal Log -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-bell me-2"></i> Signal Log
+                    </div>
+                    <div class="card-body signal-list">
+                        <table class="table table-hover" id="signals-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Type</th>
+                                    <th>Symbol</th>
+                                    <th>Price</th>
+                                    <th>SuperTrend</th>
+                                    <th>RSI</th>
+                                </tr>
+                            </thead>
+                            <tbody id="signals-body">
+                                <tr>
+                                    <td colspan="6" class="text-center">No signals yet</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Symbol Status -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-list-check me-2"></i> Symbol Status
+                    </div>
+                    <div class="card-body">
+                        <table class="table table-hover" id="symbols-table">
+                            <thead>
+                                <tr>
+                                    <th>Symbol</th>
+                                    <th>Price</th>
+                                    <th>SuperTrend</th>
+                                    <th>Direction</th>
+                                    <th>RSI</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="symbols-body">
+                                <!-- Will be filled by JavaScript -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // WebSocket connection
+        let ws = null;
+        let wsStatus = 'disconnected';
+        let dashboardData = {
+            strategy_status: 'idle',
+            active_symbols: [],
+            signals: [],
+            positions: [],
+            performance: {
+                total_trades: 0,
+                winning_trades: 0,
+                losing_trades: 0,
+                win_rate: 0.0,
+                profit_factor: 0.0,
+                total_profit: 0.0
+            }
+        };
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        const reconnectInterval = 3000; // 3 seconds
+
+        // Initialize WebSocket connection
+        function connectWebSocket() {
+            updateWSStatus('connecting');
+            
+            // Close existing connection if any
+            if (ws) {
+                ws.close();
+            }
+            
+            // Create new connection
+            const wsUrl = `ws://${window.location.hostname}:8765`;
+            ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                console.log('WebSocket connected');
+                updateWSStatus('connected');
+                reconnectAttempts = 0;
+                
+                // Request initial data
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    command: 'refresh'
+                }));
+            };
+            
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                updateWSStatus('disconnected');
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket closed');
+                updateWSStatus('disconnected');
+                
+                // Attempt to reconnect
+                if (reconnectAttempts < maxReconnectAttempts) {
+                    reconnectAttempts++;
+                    console.log(`Reconnecting... Attempt ${reconnectAttempts}`);
+                    setTimeout(connectWebSocket, reconnectInterval);
+                } else {
+                    console.error('Max reconnect attempts reached');
+                }
+            };
+        }
+
+        // Update WebSocket status UI
+        function updateWSStatus(status) {
+            wsStatus = status;
+            const indicator = document.getElementById('ws-indicator');
+            const statusText = document.getElementById('ws-status-text');
+            
+            indicator.className = 'ws-status';
+            
+            switch (status) {
+                case 'connected':
+                    indicator.classList.add('ws-connected');
+                    statusText.textContent = 'Connected';
+                    break;
+                case 'connecting':
+                    indicator.classList.add('ws-connecting');
+                    statusText.textContent = 'Connecting...';
+                    break;
+                case 'disconnected':
+                    indicator.classList.add('ws-disconnected');
+                    statusText.textContent = 'Disconnected';
+                    break;
+            }
+        }
+
+        // Handle WebSocket messages
+        function handleWebSocketMessage(message) {
+            if (message.type === 'dashboard_update') {
+                dashboardData = message.data;
+                updateDashboard();
+            }
+        }
+
+        // Update dashboard UI with latest data
+        function updateDashboard() {
+            // Update status
+            const statusBadge = document.getElementById('status-badge');
+            const statusDetails = document.getElementById('status-details');
+            
+            statusBadge.className = 'badge';
+            statusDetails.className = 'p-3 rounded';
+            
+            switch (dashboardData.strategy_status) {
+                case 'running':
+                    statusBadge.classList.add('bg-success');
+                    statusBadge.textContent = 'Running';
+                    statusDetails.classList.add('bg-running');
+                    break;
+                case 'stopped':
+                    statusBadge.classList.add('bg-danger');
+                    statusBadge.textContent = 'Stopped';
+                    statusDetails.classList.add('bg-stopped');
+                    break;
+                default:
+                    statusBadge.classList.add('bg-warning');
+                    statusBadge.textContent = 'Idle';
+                    statusDetails.classList.add('bg-idle');
+            }
+            
+            // Update active symbols
+            document.getElementById('active-symbols-count').textContent = dashboardData.active_symbols.length;
+            
+            // Update last update time
+            document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+            
+            // Update performance metrics
+            const perf = dashboardData.performance;
+            document.getElementById('total-profit').textContent = formatCurrency(perf.total_profit);
+            document.getElementById('total-profit').className = perf.total_profit >= 0 ? 'fs-4 text-positive' : 'fs-4 text-negative';
+            
+            document.getElementById('win-rate').textContent = `${perf.win_rate.toFixed(1)}%`;
+            document.getElementById('total-trades').textContent = perf.total_trades;
+            document.getElementById('profit-factor').textContent = perf.profit_factor.toFixed(2);
+            
+            document.getElementById('winning-trades').textContent = `${perf.winning_trades} Wins`;
+            document.getElementById('losing-trades').textContent = `${perf.losing_trades} Losses`;
+            
+            // Calculate win/loss ratio for progress bar
+            const totalTrades = perf.total_trades;
+            let winPercent = 0;
+            let lossPercent = 0;
+            
+            if (totalTrades > 0) {
+                winPercent = (perf.winning_trades / totalTrades) * 100;
+                lossPercent = (perf.losing_trades / totalTrades) * 100;
+            }
+            
+            document.getElementById('win-progress').style.width = `${winPercent}%`;
+            document.getElementById('loss-progress').style.width = `${lossPercent}%`;
+            
+            // Update positions table
+            updatePositionsTable();
+            
+            // Update signals table
+            updateSignalsTable();
+            
+            // Update symbols table
+            updateSymbolsTable();
+        }
+
+        // Update positions table
+        function updatePositionsTable() {
+            const positions = dashboardData.positions;
+            const tbody = document.getElementById('positions-body');
+            const positionsCount = document.getElementById('positions-count');
+            
+            positionsCount.textContent = positions.length;
+            
+            // Clear table
+            tbody.innerHTML = '';
+            
+            if (positions.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="7" class="text-center">No active positions</td>';
+                tbody.appendChild(row);
+                return;
+            }
+            
+            // Add positions
+            positions.forEach(pos => {
+                const row = document.createElement('tr');
+                
+                const pnlClass = pos.pnl >= 0 ? 'text-positive' : 'text-negative';
+                const pnlPercentClass = pos.pnl_percent >= 0 ? 'text-positive' : 'text-negative';
+                const sideBadge = pos.side === 'buy' ? 'bg-success' : 'bg-danger';
+                
+                row.innerHTML = `
+                    <td>${pos.symbol}</td>
+                    <td><span class="badge ${sideBadge}">${pos.side.toUpperCase()}</span></td>
+                    <td>${formatPrice(pos.entry_price)}</td>
+                    <td>${formatPrice(pos.current_price)}</td>
+                    <td class="${pnlClass}">${formatCurrency(pos.pnl)}</td>
+                    <td class="${pnlPercentClass}">${pos.pnl_percent.toFixed(2)}%</td>
+                    <td>${formatTimestamp(pos.timestamp)}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        }
+
+        // Update signals table
+        function updateSignalsTable() {
+            const signals = dashboardData.signals;
+            const tbody = document.getElementById('signals-body');
+            
+            // Clear table
+            tbody.innerHTML = '';
+            
+            if (signals.length === 0) {
+                const row = document.createElement('tr');
+                row.innerHTML = '<td colspan="6" class="text-center">No signals yet</td>';
+                tbody.appendChild(row);
+                return;
+            }
+            
+            // Add signals (newest first)
+            signals.slice().reverse().forEach(signal => {
+                const row = document.createElement('tr');
+                
+                if (signal.type === 'error') {
+                    // Error message row
+                    row.className = 'signal-error';
+                    row.innerHTML = `
+                        <td>${formatTimestamp(signal.timestamp)}</td>
+                        <td><span class="badge bg-warning">ERROR</span></td>
+                        <td>${signal.symbol || '-'}</td>
+                        <td colspan="3">${signal.message}</td>
+                    `;
+                } else {
+                    // Normal signal row
+                    row.className = signal.type === 'buy' ? 'signal-buy' : 'signal-sell';
+                    const typeBadge = signal.type === 'buy' ? 'bg-success' : 'bg-danger';
+                    
+                    row.innerHTML = `
+                        <td>${formatTimestamp(signal.timestamp)}</td>
+                        <td><span class="badge ${typeBadge}">${signal.type.toUpperCase()}</span></td>
+                        <td>${signal.symbol}</td>
+                        <td>${formatPrice(signal.price)}</td>
+                        <td>${signal.supertrend ? signal.supertrend.toFixed(2) : '-'}</td>
+                        <td>${signal.rsi ? signal.rsi.toFixed(1) : '-'}</td>
+                    `;
+                }
+                
+                tbody.appendChild(row);
+            });
+        }
+
+        // Update symbols table
+        function updateSymbolsTable() {
+            const symbols = [];
+            const config = ["BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "SOL/USDT"];
+            
+            // Create combined data from signals and positions
+            config.forEach(symbol => {
+                const isActive = dashboardData.active_symbols.includes(symbol);
+                
+                // Find latest signal for this symbol
+                const latestSignal = [...dashboardData.signals]
+                    .filter(s => s.symbol === symbol && s.type !== 'error')
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
+                
+                // Find active position for this symbol
+                const position = dashboardData.positions.find(p => p.symbol === symbol);
+                
+                symbols.push({
+                    symbol: symbol,
+                    price: position ? position.current_price : (latestSignal ? latestSignal.price : '-'),
+                    supertrend: latestSignal ? latestSignal.supertrend : '-',
+                    direction: latestSignal ? (latestSignal.type === 'buy' ? 'Up' : 'Down') : '-',
+                    rsi: latestSignal ? latestSignal.rsi : '-',
+                    active: isActive
+                });
+            });
+            
+            const tbody = document.getElementById('symbols-body');
+            tbody.innerHTML = '';
+            
+            symbols.forEach(symbol => {
+                const row = document.createElement('tr');
+                
+                const directionClass = symbol.direction === 'Up' ? 'text-positive' : (symbol.direction === 'Down' ? 'text-negative' : '');
+                const directionIcon = symbol.direction === 'Up' ? '↑' : (symbol.direction === 'Down' ? '↓' : '-');
+                
+                row.innerHTML = `
+                    <td>${symbol.symbol}</td>
+                    <td>${formatPrice(symbol.price)}</td>
+                    <td>${typeof symbol.supertrend === 'number' ? symbol.supertrend.toFixed(2) : symbol.supertrend}</td>
+                    <td class="${directionClass}">${directionIcon} ${symbol.direction}</td>
+                    <td>${typeof symbol.rsi === 'number' ? symbol.rsi.toFixed(1) : symbol.rsi}</td>
+                    <td>${symbol.active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+        }
+
+        // Format currency value
+        function formatCurrency(value) {
+            if (value === undefined || value === null) return '$0.00';
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(value);
+        }
+
+        // Format price value
+        function formatPrice(price) {
+            if (price === undefined || price === null || price === '-') return '-';
+            return parseFloat(price).toFixed(2);
+        }
+
+        // Format timestamp
+        function formatTimestamp(timestamp) {
+            if (!timestamp) return '-';
+            const date = new Date(timestamp);
+            return date.toLocaleTimeString();
+        }
+
+        // Button event handlers
+        document.getElementById('start-btn').addEventListener('click', function() {
+            if (wsStatus === 'connected') {
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    command: 'start'
+                }));
+            }
+        });
+
+        document.getElementById('stop-btn').addEventListener('click', function() {
+            if (wsStatus === 'connected') {
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    command: 'stop'
+                }));
+            }
+        });
+
+        document.getElementById('refresh-btn').addEventListener('click', function() {
+            if (wsStatus === 'connected') {
+                ws.send(JSON.stringify({
+                    type: 'command',
+                    command: 'refresh'
+                }));
+            } else {
+                // Try to reconnect if disconnected
+                connectWebSocket();
+            }
+        });
+
+        // Initial connection
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Connecting to WebSocket server...');
+            connectWebSocket();
+            
+            // Initialize config display
+            document.getElementById('timeframe').textContent = '4h';
+            document.getElementById('st-length').textContent = '50';
+            document.getElementById('st-multiplier').textContent = '1.0';
+            document.getElementById('rsi-filter').textContent = 'Enabled';
+            document.getElementById('volume-filter').textContent = 'Enabled';
+            document.getElementById('trading-mode').textContent = 'Testnet';
+            document.getElementById('trading-mode').className = 'badge bg-warning';
+        });
+    </script>
+</body>
+</html>

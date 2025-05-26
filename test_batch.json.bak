@@ -1,0 +1,48 @@
+{
+    "symbols": [
+        "BTC/USDT", "ETH/USDT", "BNB/USDT", "ADA/USDT", "SOL/USDT",
+        "XRP/USDT", "DOGE/USDT", "MATIC/USDT", "DOT/USDT", "LTC/USDT",
+        "TRX/USDT", "AVAX/USDT", "SHIB/USDT", "UNI/USDT", "LINK/USDT",
+        "ATOM/USDT", "XMR/USDT", "ETC/USDT", "XLM/USDT", "BCH/USDT",
+        "FIL/USDT", "APT/USDT", "ARB/USDT", "OP/USDT", "QNT/USDT",
+        "VET/USDT", "NEAR/USDT", "ALGO/USDT", "GRT/USDT", "AAVE/USDT",
+        "SAND/USDT", "EGLD/USDT", "MKR/USDT", "IMX/USDT", "XTZ/USDT",
+        "SNX/USDT", "RUNE/USDT", "CAKE/USDT", "KAVA/USDT", "CRV/USDT",
+        "LDO/USDT", "INJ/USDT", "STX/USDT", "GMX/USDT", "DYDX/USDT",
+        "FLOW/USDT", "CHZ/USDT", "ENJ/USDT", "ZIL/USDT", "1INCH/USDT",
+        "CRO/USDT", "SUSHI/USDT", "COMP/USDT", "BAT/USDT", "YFI/USDT",
+        "BTT/USDT", "HOT/USDT", "CELR/USDT", "ANKR/USDT", "RSR/USDT"
+    ],
+    "timeframes": ["1m", "5m", "15m", "30m"],
+    "days": 90,
+    "st_length": 50,
+    "st_multiplier": 1.0,
+    "enhanced_st": {
+        "enabled": true,
+        "volume_filter": true,
+        "volume_threshold": 1.5,
+        "rsi_filter": true,
+        "rsi_period": 14,
+        "rsi_overbought": 70,
+        "rsi_oversold": 35,
+        "trailing_stop": 2.0
+    },
+    "testnet": {
+        "enabled": true,
+        "exchange": "bitget",
+        "api_key": "bg_5400882ef43c5596ffcf4af0c697b250",
+        "api_secret": "60e42c8f086221d6dd992fc93e5fb810b0354adaa09b674558c14cbd49969d45",
+        "use_sandbox": true
+    },
+    "risk_management": {
+        "position_size_percent": 2.0,
+        "max_open_trades": 3,
+        "stop_loss_percent": 5.0,
+        "take_profit_percent": 10.0
+    },
+    "execution": {
+        "live_trading": true,
+        "paper_trading": false,
+        "trade_mode": "live"
+    }
+}

@@ -8,16 +8,35 @@ import numpy as np
 import ccxt
 import asyncio
 from datetime import datetime, timedelta
-import matplotlib.pyplot as plt
 import seaborn as sns
 from typing import Dict, List, Optional, Tuple
 import logging
 from dataclasses import dataclass
 import json
+import colorama
+from colorama import Fore, Style, Back
+from prettytable import PrettyTable
+import glob
+import traceback
+colorama.init(autoreset=True)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+def tail_log_files(n=30):
+    log_files = glob.glob("*.log")
+    for log_file in log_files:
+        print(f"\n--- Last {n} lines of {log_file} ---")
+        try:
+            with open(log_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+                for line in lines[-n:]:
+                    print(line.rstrip())
+        except Exception as e:
+            print(f"Could not read {log_file}: {e}")
+
+tail_log_files()
 
 @dataclass
 class PullbackEvent:
@@ -44,9 +63,10 @@ class SuperZPullbackAnalyzer:
             'apiKey': '',
             'secret': '',
             'password': '',
-            'sandbox': False,
+            'sandbox': True,  # Enable testnet mode
             'enableRateLimit': True,
         })
+        print(f"{Back.YELLOW}{Fore.BLACK}{Style.BRIGHT}WARNING: Running in TESTNET/SANDBOX mode! All data is from the exchange testnet.\n{Style.RESET_ALL}")
         self.pullback_events: List[PullbackEvent] = []
         
     def calculate_vhma(self, df: pd.DataFrame, length: int = 21) -> pd.Series:
@@ -321,81 +341,6 @@ class SuperZPullbackAnalyzer:
         
         return stats
     
-    def plot_pullback_analysis(self, pullback_events: List[PullbackEvent], symbol: str):
-        """
-        Create visualizations for pullback analysis
-        """
-        if not pullback_events:
-            print("No pullback events to plot")
-            return
-        
-        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-        fig.suptitle(f'Super Z Strategy Pullback Analysis - {symbol}', fontsize=16)
-        
-        # 1. Pullback percentage distribution
-        pullback_percentages = [e.pullback_percentage for e in pullback_events]
-        axes[0, 0].hist(pullback_percentages, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
-        axes[0, 0].set_title('Pullback Percentage Distribution')
-        axes[0, 0].set_xlabel('Pullback %')
-        axes[0, 0].set_ylabel('Frequency')
-        axes[0, 0].axvline(np.mean(pullback_percentages), color='red', linestyle='--', 
-                          label=f'Mean: {np.mean(pullback_percentages):.2f}%')
-        axes[0, 0].legend()
-        
-        # 2. Red VHMA duration vs Pullback percentage
-        red_durations = [e.vhma_red_duration for e in pullback_events]
-        axes[0, 1].scatter(red_durations, pullback_percentages, alpha=0.6, color='orange')
-        axes[0, 1].set_title('Red VHMA Duration vs Pullback %')
-        axes[0, 1].set_xlabel('Red VHMA Candles')
-        axes[0, 1].set_ylabel('Pullback %')
-        
-        # Add correlation line
-        if len(red_durations) > 1:
-            z = np.polyfit(red_durations, pullback_percentages, 1)
-            p = np.poly1d(z)
-            axes[0, 1].plot(red_durations, p(red_durations), "r--", alpha=0.8)
-            correlation = np.corrcoef(red_durations, pullback_percentages)[0, 1]
-            axes[0, 1].text(0.05, 0.95, f'Correlation: {correlation:.3f}', 
-                           transform=axes[0, 1].transAxes, bbox=dict(boxstyle="round", facecolor='wheat'))
-        
-        # 3. Recovery rate by signal type
-        long_events = [e for e in pullback_events if e.signal_type == 'long']
-        short_events = [e for e in pullback_events if e.signal_type == 'short']
-        
-        recovery_data = []
-        if long_events:
-            long_recovery = len([e for e in long_events if e.recovered]) / len(long_events)
-            recovery_data.append(('Long', long_recovery))
-        if short_events:
-            short_recovery = len([e for e in short_events if e.recovered]) / len(short_events)
-            recovery_data.append(('Short', short_recovery))
-        
-        if recovery_data:
-            signal_types, recovery_rates = zip(*recovery_data)
-            axes[1, 0].bar(signal_types, recovery_rates, color=['green', 'red'], alpha=0.7)
-            axes[1, 0].set_title('Recovery Rate by Signal Type')
-            axes[1, 0].set_ylabel('Recovery Rate')
-            axes[1, 0].set_ylim(0, 1)
-            
-            # Add percentage labels on bars
-            for i, v in enumerate(recovery_rates):
-                axes[1, 0].text(i, v + 0.02, f'{v:.1%}', ha='center', va='bottom')
-        
-        # 4. Pullback percentage by signal type
-        if long_events and short_events:
-            long_pullbacks = [e.pullback_percentage for e in long_events]
-            short_pullbacks = [e.pullback_percentage for e in short_events]
-            
-            axes[1, 1].boxplot([long_pullbacks, short_pullbacks], 
-                              labels=['Long Signals', 'Short Signals'])
-            axes[1, 1].set_title('Pullback % Distribution by Signal Type')
-            axes[1, 1].set_ylabel('Pullback %')
-        
-        plt.tight_layout()
-        plt.show()
-        
-        return fig
-    
     async def run_comprehensive_analysis(self, symbols: List[str], 
                                        timeframe: str = '4h', 
                                        days: int = 90) -> Dict:
@@ -434,10 +379,6 @@ class SuperZPullbackAnalyzer:
                 'statistics': stats,
                 'data': df_with_indicators
             }
-            
-            # Create plots for this symbol
-            if pullback_events:
-                self.plot_pullback_analysis(pullback_events, symbol)
         
         return all_results
     
@@ -534,19 +475,15 @@ class SuperZPullbackAnalyzer:
 
 # Example usage
 async def main():
-    """
-    Example usage of the Super Z Pullback Analyzer
-    """
+    """Main function to run the strategy"""
+    try:
     analyzer = SuperZPullbackAnalyzer()
     
-    # Symbols to analyze (add more as needed)
-    symbols = [
-        'BTC/USDT:USDT',
-        'ETH/USDT:USDT', 
-        'ADA/USDT:USDT',
-        'SOL/USDT:USDT',
-        'MATIC/USDT:USDT'
-    ]
+        # Dynamically fetch all USDT-margined swap symbols from Bitget
+        print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Fetching all Bitget USDT-margined swap symbols...{Style.RESET_ALL}")
+        markets = await asyncio.to_thread(analyzer.exchange.load_markets)
+        symbols = [s for s, m in markets.items() if m.get('swap') and m.get('quote') == 'USDT']
+        print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Scanning {len(symbols)} symbols: {symbols[:10]}... (+{len(symbols)-10} more){Style.RESET_ALL}")
     
     # Run analysis
     results = await analyzer.run_comprehensive_analysis(
@@ -561,7 +498,7 @@ async def main():
     
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    with open(f'super_z_pullback_analysis_{timestamp}.txt', 'w') as f:
+        with open(f'super_z_pullback_analysis_{timestamp}.txt', 'w', encoding='utf-8') as f:
         f.write(report)
     
     # Save detailed data as JSON
@@ -573,12 +510,65 @@ async def main():
             'pullback_count': len(data['pullback_events'])
         }
     
-    with open(f'super_z_analysis_data_{timestamp}.json', 'w') as f:
+        with open(f'super_z_analysis_data_{timestamp}.json', 'w', encoding='utf-8') as f:
         json.dump(serializable_results, f, indent=2)
     
     print(f"\nAnalysis complete! Report saved to super_z_pullback_analysis_{timestamp}.txt")
     return results
+    except Exception as e:
+        logger.error(f"Main error: {e}")
+        traceback.print_exc()
 
 if __name__ == "__main__":
     # Run the analysis
     results = asyncio.run(main())
+
+# After analysis, build a cyberpunk PrettyTable for signals
+
+def print_cyberpunk_table(signals):
+    table = PrettyTable()
+    table.field_names = [
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}Symbol",
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}TF",
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}Tier",
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}Signal",
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}Price",
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}Time",
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}Volume",
+        f"{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}Filters"
+    ]
+    for s in signals:
+        # Assign tier and color
+        tier, emoji, color = get_signal_tier(s)
+        table.add_row([
+            f"{Back.BLACK}{Fore.CYAN}{s['symbol']}",
+            f"{Back.BLACK}{Fore.MAGENTA}{s['timeframe']}",
+            f"{color}{tier} {emoji}",
+            f"{color}{s['signal']}",
+            f"{Fore.YELLOW}{s['price']:.2f}",
+            f"{Fore.GREEN}{s['time']}",
+            f"{Fore.CYAN}{s['volume']:.2f}",
+            f"{Fore.LIGHTMAGENTA_EX}{s['filters']}"
+        ])
+    print(f"\n{Back.MAGENTA}{Fore.CYAN}{Style.BRIGHT}=== CYBERPUNK SUPER Z SIGNALS ==={Style.RESET_ALL}")
+    print(table)
+    print(f"{Back.MAGENTA}{Fore.CYAN}Legend: 🟢 Strong Buy | 🟡 Buy | ⚪️ Hold | 🔴 Sell | 💀 Strong Sell | 🔄 Trend Change | 🌀 Pullback{Style.RESET_ALL}\n")
+
+# Helper to assign tier, emoji, and color
+
+def get_signal_tier(signal):
+    # Example logic, adjust as needed
+    if signal['signal'] == 'BUY' and signal['filters'].count('✔️') >= 2:
+        return 'Strong Buy', '🟢', Back.GREEN + Fore.BLACK
+    elif signal['signal'] == 'BUY':
+        return 'Buy', '🟡', Back.YELLOW + Fore.BLACK
+    elif signal['signal'] == 'SELL' and signal['filters'].count('✔️') >= 2:
+        return 'Strong Sell', '💀', Back.RED + Fore.WHITE
+    elif signal['signal'] == 'SELL':
+        return 'Sell', '🔴', Back.LIGHTRED_EX + Fore.WHITE
+    elif 'Trend' in signal.get('tier', ''):
+        return 'Trend Change', '🔄', Back.CYAN + Fore.BLACK
+    elif 'Pullback' in signal.get('tier', ''):
+        return 'Pullback', '🌀', Back.MAGENTA + Fore.WHITE
+    else:
+        return 'Hold', '⚪️', Back.BLACK + Fore.WHITE

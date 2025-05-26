@@ -165,7 +165,7 @@ class DataService:
         self.redis_client = None
         self.message_queue = None
         self.exchange_feeds: Dict[str, Dict] = {}
-        self.supported_exchanges = ["binance", "coinbase", "kraken", "ftx"]
+        self.supported_exchanges = ["bitget"]
         self.active_symbols: Set[str] = set()
         
     async def initialize(self):
@@ -181,19 +181,17 @@ class DataService:
         
         # Start tasks for each exchange
         for exchange in self.supported_exchanges:
-            if exchange == "binance":
-                asyncio.create_task(self._binance_websocket_feed())
-            elif exchange == "coinbase":
-                asyncio.create_task(self._coinbase_websocket_feed())
+            if exchange == "bitget":
+                asyncio.create_task(self._bitget_websocket_feed())
             # Add more exchanges as needed
                 
-    async def _binance_websocket_feed(self):
-        """Connect to Binance WebSocket feed"""
+    async def _bitget_websocket_feed(self):
+        """Connect to Bitget WebSocket feed"""
         try:
-            uri = "wss://stream.binance.com:9443/ws/!ticker@arr"
+            uri = "wss://stream.bitget.com/spot/public/v1/market"
             
             async with websockets.connect(uri) as websocket:
-                logger.info("Connected to Binance WebSocket feed")
+                logger.info("Connected to Bitget WebSocket feed")
                 
                 async for message in websocket:
                     try:
@@ -201,21 +199,21 @@ class DataService:
                         
                         if isinstance(data, list):
                             for ticker in data:
-                                await self._process_binance_ticker(ticker)
+                                await self._process_bitget_ticker(ticker)
                         else:
-                            await self._process_binance_ticker(data)
+                            await self._process_bitget_ticker(data)
                             
                     except Exception as e:
-                        logger.error(f"Error processing Binance message: {e}")
+                        logger.error(f"Error processing Bitget message: {e}")
                         
         except Exception as e:
-            logger.error(f"Binance WebSocket connection error: {e}")
+            logger.error(f"Bitget WebSocket connection error: {e}")
             # Implement reconnection logic
             await asyncio.sleep(5)
-            asyncio.create_task(self._binance_websocket_feed())
+            asyncio.create_task(self._bitget_websocket_feed())
     
-    async def _process_binance_ticker(self, ticker_data: Dict[str, Any]):
-        """Process Binance ticker data"""
+    async def _process_bitget_ticker(self, ticker_data: Dict[str, Any]):
+        """Process Bitget ticker data"""
         try:
             symbol = ticker_data.get("s")  # Symbol
             price = Decimal(ticker_data.get("c", "0"))  # Current price
@@ -250,78 +248,7 @@ class DataService:
             )
             
         except Exception as e:
-            logger.error(f"Error processing Binance ticker: {e}")
-    
-    async def _coinbase_websocket_feed(self):
-        """Connect to Coinbase WebSocket feed"""
-        try:
-            uri = "wss://ws-feed.pro.coinbase.com"
-            
-            subscribe_message = {
-                "type": "subscribe",
-                "product_ids": ["BTC-USD", "ETH-USD", "ADA-USD"],
-                "channels": ["ticker"]
-            }
-            
-            async with websockets.connect(uri) as websocket:
-                await websocket.send(json.dumps(subscribe_message))
-                logger.info("Connected to Coinbase WebSocket feed")
-                
-                async for message in websocket:
-                    try:
-                        data = json.loads(message)
-                        
-                        if data.get("type") == "ticker":
-                            await self._process_coinbase_ticker(data)
-                            
-                    except Exception as e:
-                        logger.error(f"Error processing Coinbase message: {e}")
-                        
-        except Exception as e:
-            logger.error(f"Coinbase WebSocket connection error: {e}")
-            # Implement reconnection logic
-            await asyncio.sleep(5)
-            asyncio.create_task(self._coinbase_websocket_feed())
-    
-    async def _process_coinbase_ticker(self, ticker_data: Dict[str, Any]):
-        """Process Coinbase ticker data"""
-        try:
-            symbol = ticker_data.get("product_id", "").replace("-", "")
-            price = Decimal(ticker_data.get("price", "0"))
-            volume = Decimal(ticker_data.get("volume_24h", "0"))
-            high_24h = Decimal(ticker_data.get("high_24h", "0"))
-            low_24h = Decimal(ticker_data.get("low_24h", "0"))
-            bid = Decimal(ticker_data.get("best_bid", "0"))
-            ask = Decimal(ticker_data.get("best_ask", "0"))
-            
-            market_data = MarketData(
-                symbol=symbol,
-                timestamp=datetime.utcnow(),
-                price=price,
-                volume=volume,
-                bid=bid,
-                ask=ask,
-                high_24h=high_24h,
-                low_24h=low_24h
-            )
-            
-            # Store in Redis
-            await self._store_market_data(market_data)
-            
-            # Broadcast to WebSocket clients
-            await connection_manager.broadcast_market_data(
-                symbol,
-                market_data.dict()
-            )
-            
-            # Publish to message queue
-            await self.message_queue.publish_market_data(
-                symbol,
-                market_data.dict()
-            )
-            
-        except Exception as e:
-            logger.error(f"Error processing Coinbase ticker: {e}")
+            logger.error(f"Error processing Bitget ticker: {e}")
     
     async def _store_market_data(self, market_data: MarketData):
         """Store market data in Redis with expiration"""

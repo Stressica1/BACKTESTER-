@@ -751,7 +751,7 @@
                 
                 DashboardState.tvWidget = new TradingView.widget({
                     autosize: true,
-                    symbol: `BINANCE:${DashboardState.currentSymbol}`,
+                    symbol: `BITGET:${DashboardState.currentSymbol}`,
                     interval: "15",
                     container_id: "tradingViewChart",
                     library_path: "https://s3.tradingview.com/tv.js/",
@@ -960,7 +960,7 @@
                 DashboardState.currentSymbol = this.value;
                 if (DashboardState.tvWidget) {
                     try {
-                        DashboardState.tvWidget.setSymbol(`BINANCE:${this.value}`, '15');
+                        DashboardState.tvWidget.setSymbol(`BITGET:${this.value}`, '15');
                     } catch (e) {
                         console.error('Error changing symbol:', e);
                     }

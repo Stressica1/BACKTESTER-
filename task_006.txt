@@ -1,0 +1,11 @@
+# Task ID: 6
+# Title: Implement Interactive Charts for Data Visualization
+# Status: pending
+# Dependencies: None
+# Priority: medium
+# Description: Add interactive charts for price data, backtest results, and performance metrics visualization.
+# Details:
+This task focuses on implementing interactive charts in the dashboard for visualizing price data, backtest results, and performance metrics. It includes selecting and integrating a JavaScript charting library, creating components for different chart types (candlestick, equity curve, etc.), and ensuring charts are responsive and performant with large datasets.
+
+# Test Strategy:
+

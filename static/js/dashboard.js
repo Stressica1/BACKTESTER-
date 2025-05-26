@@ -62,7 +62,7 @@ function initTradingViewWidget() {
         // Create TradingView widget
         new TradingView.widget({
             autosize: true,
-            symbol: "BINANCE:BTCUSDT",
+            symbol: "BITGET:BTCUSDT",
             interval: "15",
             timezone: "Etc/UTC",
             theme: "dark",

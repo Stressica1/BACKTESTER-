@@ -1,0 +1,11 @@
+# Task ID: 17
+# Title: Cleanup stale files and update documentation
+# Status: pending
+# Dependencies: None
+# Priority: low
+# Description: Remove unused files older than four days, tidy up codebase, and update `README.md` and documentation to reflect new architecture.
+# Details:
+Identify and delete redundant scripts, update project structure in README, add usage examples and development guidelines.
+
+# Test Strategy:
+Run file audit to ensure no leftover scripts from before and review updated documentation for accuracy.

@@ -1,0 +1,11 @@
+# Task ID: 5
+# Title: Create Basic Dashboard Layout
+# Status: pending
+# Dependencies: None
+# Priority: medium
+# Description: Design and implement the basic dashboard UI with dark/light theme support and responsive design.
+# Details:
+This task involves creating the foundation for the web dashboard using Jinja2 templates. It includes designing a clean, responsive layout with dark/light theme support, implementing the basic navigation structure, and setting up the CSS framework. The dashboard should be mobile-friendly and follow modern UI design principles.
+
+# Test Strategy:
+
