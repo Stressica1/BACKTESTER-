@@ -680,7 +680,21 @@ class EnhancedSuperTrend:
         for method in methods:
             self.print_cyberpunk_table(all_results, method)
         self.print_performance_summary()
-        print(f"{Fore.CYAN}Dry-run mode: No real trades were placed.\n{Style.RESET_ALL}")
+        # CONTRARIAN TRADING: invert strict signals
+        for r in all_results:
+            strict = r.get('strict', {})
+            sym = strict.get('symbol')
+            sig = strict.get('signal')
+            price = strict.get('price')
+            if sig == 'BUY':
+                side = 'sell'
+            elif sig == 'SELL':
+                side = 'buy'
+            else:
+                continue
+            amount = self.calculate_position_size(sym, price)
+            order = self.place_order(sym, side, amount, price)
+            logger.info(f"Contrarian trade executed: {side.upper()} {sym} {amount:.6f} @ {price} -> {order}")
 
 async def main():
     """Main function to run the strategy"""
