@@ -19,6 +19,9 @@ import concurrent.futures
 from tqdm import tqdm
 import prettytable
 import multiprocessing
+import sys
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # Configure logging
 logging.basicConfig(
@@ -58,18 +61,23 @@ class EnhancedSuperTrend:
         self.config = self.load_config(config_file)
         print(f"\nLoaded config: {json.dumps(self.config, indent=2)}\n")
         self.exchange = self.setup_exchange()
-        # Fetch all testnet swap pairs dynamically
-        print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Fetching all Bitget USDT-margined swap pairs from testnet...{Style.RESET_ALL}")
-        try:
-            markets = self.exchange.load_markets()
-            testnet_symbols = [s for s, m in markets.items() if m.get('swap') and m.get('quote') == 'USDT']
-        except Exception as e:
-            logger.exception(f"Could not load markets from testnet: {e}. Using config symbols.")
-            testnet_symbols = self.config.get('symbols', [])
-        self.config['symbols'] = testnet_symbols
-        print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Scanning {len(testnet_symbols)} testnet pairs: {testnet_symbols[:10]}... (+{len(testnet_symbols)-10} more){Style.RESET_ALL}")
-        if self.config.get('testnet', {}).get('use_sandbox', True):
+        # Determine symbol list
+        if self.config.get('testnet', {}).get('enabled') and self.config['testnet'].get('use_sandbox'):
+            print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Fetching all Bitget USDT-margined swap pairs from testnet...{Style.RESET_ALL}")
+            try:
+                markets = self.exchange.load_markets()
+                symbols = [s for s, m in markets.items() if m.get('swap') and m.get('quote') == 'USDT']
+            except Exception as e:
+                logger.exception(f"Could not load markets from testnet: {e}. Using config symbols.")
+                symbols = self.config.get('symbols', [])
+            self.config['symbols'] = symbols
+            print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Scanning {len(symbols)} testnet pairs: {symbols[:10]}... (+{len(symbols)-10} more){Style.RESET_ALL}")
             print(f"[WARNING] Exchange is in testnet/sandbox mode. Some exchanges do not support OHLCV data in sandbox mode!\n")
+        else:
+            # Use symbols defined in configuration file
+            symbols = self.config.get('symbols', [])
+            print(f"{Fore.GREEN}Using symbols from configuration file: {symbols[:10]}... (+{len(symbols)-10} more if applicable){Style.RESET_ALL}")
+            self.config['symbols'] = symbols
         self.active_trades = {}
         self.position_status = {}
         self.dashboard_data = {

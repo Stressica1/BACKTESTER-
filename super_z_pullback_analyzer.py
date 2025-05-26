@@ -477,8 +477,8 @@ class SuperZPullbackAnalyzer:
 async def main():
     """Main function to run the strategy"""
     try:
-    analyzer = SuperZPullbackAnalyzer()
-    
+        analyzer = SuperZPullbackAnalyzer()
+        
         # Dynamically fetch all USDT-margined swap symbols from Bitget
         print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Fetching all Bitget USDT-margined swap symbols...{Style.RESET_ALL}")
         markets = await asyncio.to_thread(analyzer.exchange.load_markets)
@@ -498,7 +498,7 @@ async def main():
     
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        with open(f'super_z_pullback_analysis_{timestamp}.txt', 'w', encoding='utf-8') as f:
+    with open(f'super_z_pullback_analysis_{timestamp}.txt', 'w', encoding='utf-8') as f:
         f.write(report)
     
     # Save detailed data as JSON
@@ -510,7 +510,7 @@ async def main():
             'pullback_count': len(data['pullback_events'])
         }
     
-        with open(f'super_z_analysis_data_{timestamp}.json', 'w', encoding='utf-8') as f:
+    with open(f'super_z_analysis_data_{timestamp}.json', 'w', encoding='utf-8') as f:
         json.dump(serializable_results, f, indent=2)
     
     print(f"\nAnalysis complete! Report saved to super_z_pullback_analysis_{timestamp}.txt")
