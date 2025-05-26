@@ -13,6 +13,8 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 import aiohttp
 import json
+import requests
+from requests.adapters import HTTPAdapter
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="invalid value encountered in scalar divide")
@@ -97,11 +99,18 @@ class VolatilityScanner:
     
     def __init__(self, api_key: str = None, api_secret: str = None, passphrase: str = None, testnet: bool = True):
         """Initialize the scanner with Bitget API credentials"""
+        # Temporary session before defining max_concurrent_requests
+        temp_session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=20, pool_maxsize=20)
+        temp_session.mount('https://', adapter)
+        temp_session.mount('http://', adapter)
+        # Initialize CCXT exchange with custom HTTP session to increase pool size
         self.exchange = ccxt.bitget({
             'apiKey': api_key,
             'secret': api_secret,
             'password': passphrase,  # Bitget requires passphrase
             'enableRateLimit': False,  # Disable to go faster
+            'session': temp_session,
             'options': {
                 'defaultType': 'swap',  # For USDT-M futures
                 'adjustForTimeDifference': True
@@ -148,6 +157,14 @@ class VolatilityScanner:
         
         # Connection pool for aiohttp
         self.session = None
+        
+        # Override CCXT HTTP session with increased pool size to avoid 'pool is full' warnings
+        session = requests.Session()
+        adapter = HTTPAdapter(pool_connections=self.max_concurrent_requests, pool_maxsize=self.max_concurrent_requests)
+        session.mount('https://', adapter)
+        session.mount('http://', adapter)
+        # Assign to CCXT exchange
+        self.exchange.session = session
         
         # Pre-computed constants for faster calculations
         self.volatility_regimes = {
