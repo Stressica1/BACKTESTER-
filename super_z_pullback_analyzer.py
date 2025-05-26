@@ -473,54 +473,44 @@ class SuperZPullbackAnalyzer:
         
         return "\n".join(report)
 
-# Example usage
 async def main():
     """Main function to run the strategy"""
-    try:
-        analyzer = SuperZPullbackAnalyzer()
-        
-        # Dynamically fetch all USDT-margined swap symbols from Bitget
-        print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Fetching all Bitget USDT-margined swap symbols...{Style.RESET_ALL}")
-        markets = await asyncio.to_thread(analyzer.exchange.load_markets)
-        symbols = [s for s, m in markets.items() if m.get('swap') and m.get('quote') == 'USDT']
-        print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Scanning {len(symbols)} symbols: {symbols[:10]}... (+{len(symbols)-10} more){Style.RESET_ALL}")
-    
+    analyzer = SuperZPullbackAnalyzer()
+
+    # Dynamically fetch all USDT-margined swap symbols from Bitget
+    print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Fetching all Bitget USDT-margined swap symbols...{Style.RESET_ALL}")
+    markets = await asyncio.to_thread(analyzer.exchange.load_markets)
+    symbols = [s for s, m in markets.items() if m.get('swap') and m.get('quote') == 'USDT']
+    print(f"{Back.CYAN}{Fore.BLACK}{Style.BRIGHT}Scanning {len(symbols)} symbols: {symbols[:10]}... (+{len(symbols)-10} more){Style.RESET_ALL}")
+
     # Run analysis
-    results = await analyzer.run_comprehensive_analysis(
-        symbols=symbols,
-        timeframe='4h',  # Match your TradingView timeframe
-        days=60  # Analyze last 60 days
-    )
-    
+    results = await analyzer.run_comprehensive_analysis(symbols=symbols, timeframe='4h', days=60)
+
     # Generate and print report
     report = analyzer.generate_report(results)
     print(report)
-    
+
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     with open(f'super_z_pullback_analysis_{timestamp}.txt', 'w', encoding='utf-8') as f:
         f.write(report)
-    
+
     # Save detailed data as JSON
-    serializable_results = {}
-    for symbol, data in results.items():
-        serializable_results[symbol] = {
+    serializable_results = {
+        symbol: {
             'statistics': data['statistics'],
             'signal_count': len(data['signals']),
             'pullback_count': len(data['pullback_events'])
         }
-    
+        for symbol, data in results.items()
+    }
     with open(f'super_z_analysis_data_{timestamp}.json', 'w', encoding='utf-8') as f:
         json.dump(serializable_results, f, indent=2)
-    
+
     print(f"\nAnalysis complete! Report saved to super_z_pullback_analysis_{timestamp}.txt")
     return results
-    except Exception as e:
-        logger.error(f"Main error: {e}")
-        traceback.print_exc()
 
 if __name__ == "__main__":
-    # Run the analysis
     results = asyncio.run(main())
 
 # After analysis, build a cyberpunk PrettyTable for signals
