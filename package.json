@@ -1,0 +1,15 @@
+{
+  "scripts": {
+    "dev": "next dev --turbo",
+    "build": "NODE_ENV=production next build",
+    "profile": "0x next start",
+    "analyze": "cross-env ANALYZE=true next build"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/material": "^7.1.0",
+    "@swc/core": "^1.3.100",
+    "critters": "^0.0.23"
+  }
+}

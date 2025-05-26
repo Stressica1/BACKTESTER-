@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ultimate Trading Dashboard - Unified</title>
+    
+    <!-- Essential CSS Libraries -->
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- TradingView Widget -->
+    <script src="https://s3.tradingview.com/tv.js"></script>
+    
+    <style>
+        :root {
+            /* Unified Color Scheme */
+            --primary: #00f5d4;
+            --secondary: #00bbf9;
+            --success: #00f5a0;
+            --warning: #fee440;
+            --danger: #f15bb5;
+            --background: #05070f;
+            --surface: #0f1729;
+            --surface-variant: #192338;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            
+            /* Layout */
+            --header-height: 64px;
+            --sidebar-width: 280px;
+            --border-radius: 8px;
+            --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--background);
+            color: var(--text);
+            overflow-x: hidden;
+        }
+
+        /* Layout Grid */
+        .dashboard-layout {
+            display: grid;
+            grid-template-areas: 
+                "sidebar header"
+                "sidebar main";
+            grid-template-columns: var(--sidebar-width) 1fr;
+            grid-template-rows: var(--header-height) 1fr;
+            height: 100vh;
+        }
+
+        /* Header */
+        .header {
+            grid-area: header;
+            background: var(--surface);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 1.5rem;
+        }
+
+        .header-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: var(--border-radius);
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .connection-status.connected {
+            background: rgba(0, 245, 160, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(0, 245, 160, 0.3);
+        }
+
+        .connection-status.connecting {
+            background: rgba(254, 228, 64, 0.1);
+            color: var(--warning);
+            border: 1px solid rgba(254, 228, 64, 0.3);
+        }
+
+        .connection-status.disconnected {
+            background: rgba(241, 91, 181, 0.1);
+            color: var(--danger);
+            border: 1px solid rgba(241, 91, 181, 0.3);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* Sidebar */
+        .sidebar {
+            grid-area: sidebar;
+            background: var(--surface);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+            text-align: center;
+        }
+
+        .nav-menu {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .nav-item {
+            padding: 0.75rem 1rem;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-item.active {
+            background: rgba(0, 245, 212, 0.1);
+            color: var(--primary);
+            border: 1px solid rgba(0, 245, 212, 0.3);
+        }
+
+        /* Main Content */
+        .main-content {
+            grid-area: main;
+            padding: 1.5rem;
+            overflow-y: auto;
+            height: calc(100vh - var(--header-height));
+        }
+
+        /* Trading Section */
+        .trading-section {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 1.5rem;
+            height: 100%;
+        }
+
+        .chart-container {
+            background: var(--surface);
+            border-radius: var(--border-radius);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            min-height: 500px;
+        }
+
+        #tradingViewChart {
+            width: 100%;
+            height: 100%;
+            border-radius: var(--border-radius);
+        }
+
+        .trading-panel {
+            background: var(--surface);
+            border-radius: var(--border-radius);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .panel-section {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .section-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: var(--text);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            padding-bottom: 0.5rem;
+        }
+
+        /* Form Controls */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .form-label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--text-muted);
+        }
+
+        .form-input {
+            padding: 0.75rem;
+            background: var(--background);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: var(--border-radius);
+            color: var(--text);
+            font-size: 0.875rem;
+            transition: all 0.3s ease;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(0, 245, 212, 0.1);
+        }
+
+        .form-select {
+            padding: 0.75rem;
+            background: var(--background);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: var(--border-radius);
+            color: var(--text);
+            font-size: 0.875rem;
+            cursor: pointer;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: var(--border-radius);
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 245, 212, 0.3);
+        }
+
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--surface);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            font-size: 0.875rem;
+            color: var(--text-muted);
+        }
+
+        /* Alert System */
+        .alert {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            padding: 1rem 1.5rem;
+            border-radius: var(--border-radius);
+            color: white;
+            font-weight: 500;
+            z-index: 1000;
+            animation: slideIn 0.3s ease;
+            max-width: 400px;
+        }
+
+        .alert.success {
+            background: var(--success);
+        }
+
+        .alert.warning {
+            background: var(--warning);
+            color: var(--background);
+        }
+
+        .alert.danger {
+            background: var(--danger);
+        }
+
+        .alert.info {
+            background: var(--secondary);
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); }
+            to { transform: translateX(0); }
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(5, 7, 15, 0.9);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            transition: opacity 0.3s ease;
+        }
+
+        .loading-overlay.hidden {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid rgba(0, 245, 212, 0.2);
+            border-top: 3px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Responsive Design */
+        @media (max-width: 768px) {
+            .dashboard-layout {
+                grid-template-areas: 
+                    "header"
+                    "main";
+                grid-template-columns: 1fr;
+                grid-template-rows: var(--header-height) 1fr;
+            }
+            
+            .sidebar {
+                display: none;
+            }
+            
+            .trading-section {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+        <h2 style="color: var(--primary); margin-bottom: 10px;">Ultimate Trading Dashboard</h2>
+        <p style="color: var(--text-muted);">Initializing connection...</p>
+    </div>
+
+    <div class="dashboard-layout">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="logo">
+                <i class="mdi mdi-chart-line"></i>
+                TradingBot
+            </div>
+            
+            <nav class="nav-menu">
+                <div class="nav-item active" data-section="trading">
+                    <i class="mdi mdi-chart-candlestick"></i>
+                    Trading
+                </div>
+                <div class="nav-item" data-section="portfolio">
+                    <i class="mdi mdi-wallet"></i>
+                    Portfolio
+                </div>
+                <div class="nav-item" data-section="history">
+                    <i class="mdi mdi-history"></i>
+                    History
+                </div>
+                <div class="nav-item" data-section="settings">
+                    <i class="mdi mdi-cog"></i>
+                    Settings
+                </div>
+            </nav>
+        </div>
+
+        <!-- Header -->
+        <div class="header">
+            <div class="header-title">Ultimate Trading Dashboard</div>
+            <div class="connection-status connecting" id="connectionStatus">
+                <div class="status-dot"></div>
+                <span id="connectionText">Connecting...</span>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalBalance">$0.00</div>
+                    <div class="stat-label">Total Balance</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="todayPnL">$0.00</div>
+                    <div class="stat-label">Today's P&L</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="openPositions">0</div>
+                    <div class="stat-label">Open Positions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="winRate">0%</div>
+                    <div class="stat-label">Win Rate</div>
+                </div>
+            </div>
+
+            <!-- Trading Section -->
+            <div class="trading-section">
+                <!-- Chart Container -->
+                <div class="chart-container">
+                    <div id="tradingViewChart"></div>
+                </div>
+
+                <!-- Trading Panel -->
+                <div class="trading-panel">
+                    <!-- Symbol Selection -->
+                    <div class="panel-section">
+                        <div class="section-title">Trading Pair</div>
+                        <div class="form-group">
+                            <label class="form-label">Symbol</label>
+                            <select class="form-select" id="symbolSelect">
+                                <option value="BTCUSDT">BTC/USDT</option>
+                                <option value="ETHUSDT">ETH/USDT</option>
+                                <option value="SOLUSDT">SOL/USDT</option>
+                                <option value="ADAUSDT">ADA/USDT</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Order Entry -->
+                    <div class="panel-section">
+                        <div class="section-title">Place Order</div>
+                        <div class="form-group">
+                            <label class="form-label">Order Type</label>
+                            <select class="form-select" id="orderType">
+                                <option value="market">Market</option>
+                                <option value="limit">Limit</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Quantity</label>
+                            <input type="number" class="form-input" id="quantity" placeholder="0.001" step="0.001">
+                        </div>
+                        <div class="form-group" id="priceGroup" style="display: none;">
+                            <label class="form-label">Price</label>
+                            <input type="number" class="form-input" id="price" placeholder="0.00" step="0.01">
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                            <button class="btn btn-success" onclick="executeTrade('buy')">
+                                <i class="mdi mdi-arrow-up"></i>
+                                Buy
+                            </button>
+                            <button class="btn btn-danger" onclick="executeTrade('sell')">
+                                <i class="mdi mdi-arrow-down"></i>
+                                Sell
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Risk Management -->
+                    <div class="panel-section">
+                        <div class="section-title">Risk Management</div>
+                        <div class="form-group">
+                            <label class="form-label">Stop Loss (%)</label>
+                            <input type="number" class="form-input" id="stopLoss" placeholder="2.0" step="0.1">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label">Take Profit (%)</label>
+                            <input type="number" class="form-input" id="takeProfit" placeholder="5.0" step="0.1">
+                        </div>
+                        <button class="btn btn-primary" onclick="updateRiskSettings()">
+                            Update Settings
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global State Management
+        const DashboardState = {
+            isConnected: false,
+            socket: null,
+            reconnectAttempts: 0,
+            maxReconnectAttempts: 5,
+            reconnectInterval: 3000,
+            currentSymbol: 'BTCUSDT',
+            tvWidget: null
+        };
+
+        // Enhanced WebSocket Manager
+        class WebSocketManager {
+            constructor() {
+                this.socket = null;
+                this.reconnectAttempts = 0;
+                this.heartbeatInterval = null;
+                this.messageQueue = [];
+                this.isConnecting = false;
+            }            connect() {
+                if (this.isConnecting) return;
+
+                this.isConnecting = true;
+                const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
+                const wsUrl = `${protocol}${window.location.host}/ws`;
+
+                console.log(`🔌 Connecting to WebSocket: ${wsUrl}`);
+                updateConnectionStatus('connecting');
+
+                try {
+                    this.socket = new WebSocket(wsUrl);
+                    this.setupEventHandlers();
+                } catch (error) {
+                    console.error('❌ WebSocket connection failed:', error);
+                    this.handleConnectionFailure();
+                }
+            }
+
+            setupEventHandlers() {
+                this.socket.onopen = () => {
+                    console.log('✅ WebSocket connected successfully');
+                    this.isConnecting = false;
+                    this.reconnectAttempts = 0;
+                    DashboardState.isConnected = true;
+                    updateConnectionStatus('connected');
+                    this.startHeartbeat();
+                    this.sendQueuedMessages();
+                    this.subscribeToChannels();
+                };
+
+                this.socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleMessage(data);
+                    } catch (error) {
+                        console.error('❌ Error parsing WebSocket message:', error);
+                    }
+                };
+
+                this.socket.onclose = (event) => {
+                    console.log('🔌 WebSocket connection closed:', event.code, event.reason);
+                    this.isConnecting = false;
+                    DashboardState.isConnected = false;
+                    updateConnectionStatus('disconnected');
+                    this.stopHeartbeat();
+                    this.scheduleReconnect();
+                };
+
+                this.socket.onerror = (error) => {
+                    console.error('❌ WebSocket error:', error);
+                    this.handleConnectionFailure();
+                };
+            }
+
+            handleMessage(data) {
+                try {
+                    console.log('📨 Received WebSocket message:', data.type || 'unknown type');
+                    
+                    switch (data.type) {
+                        case 'dashboard_update':
+                            updateDashboardData(data.data || {});
+                            break;
+                        case 'connection_status':
+                            if (data.status === 'connected') {
+                                updateConnectionStatus('connected');
+                                showAlert('Connected to trading server', 'success');
+                            }
+                            break;
+                        case 'heartbeat':
+                            this.send({ type: 'ping', timestamp: Date.now() });
+                            break;
+                        case 'error':
+                            console.error('⚠️ WebSocket error message:', data.message || 'Unknown error');
+                            showAlert(data.message || 'Server error', 'danger');
+                            break;
+                        case 'alert':
+                            showAlert(data.message || 'Server notification', data.alertLevel || 'info');
+                            break;
+                        default:
+                            console.log('📨 Unhandled message type:', data.type, data);
+                    }
+                } catch (error) {
+                    console.error('❌ Error handling WebSocket message:', error, data);
+                }
+            }
+
+            send(data) {
+                if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                    this.socket.send(JSON.stringify(data));
+                } else {
+                    console.log('📝 Queueing message for later:', data);
+                    this.messageQueue.push(data);
+                }
+            }
+
+            sendQueuedMessages() {
+                while (this.messageQueue.length > 0) {
+                    const message = this.messageQueue.shift();
+                    this.send(message);
+                }
+            }
+
+            subscribeToChannels() {
+                this.send({
+                    type: 'subscribe',
+                    channels: ['dashboard_update', 'market_data', 'trades', 'positions']
+                });
+            }
+
+            startHeartbeat() {
+                this.heartbeatInterval = setInterval(() => {
+                    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+                        this.send({ type: 'ping', timestamp: Date.now() });
+                    }
+                }, 30000);
+            }
+
+            stopHeartbeat() {
+                if (this.heartbeatInterval) {
+                    clearInterval(this.heartbeatInterval);
+                    this.heartbeatInterval = null;
+                }
+            }
+
+            scheduleReconnect() {
+                if (this.reconnectAttempts < DashboardState.maxReconnectAttempts) {
+                    this.reconnectAttempts++;
+                    const delay = DashboardState.reconnectInterval * this.reconnectAttempts;
+                    
+                    console.log(`🔄 Scheduling reconnect attempt ${this.reconnectAttempts} in ${delay}ms`);
+                    updateConnectionStatus('connecting');
+                    
+                    setTimeout(() => {
+                        if (!DashboardState.isConnected) {
+                            this.connect();
+                        }
+                    }, delay);
+                } else {
+                    console.error('❌ Max reconnection attempts reached');
+                    updateConnectionStatus('disconnected');
+                    showAlert('Connection lost. Please refresh the page.', 'danger');
+                }
+            }
+
+            handleConnectionFailure() {
+                this.isConnecting = false;
+                DashboardState.isConnected = false;
+                updateConnectionStatus('disconnected');
+                this.scheduleReconnect();
+            }
+
+            disconnect() {
+                if (this.socket) {
+                    this.socket.close();
+                }
+                this.stopHeartbeat();
+            }
+        }
+
+        // Initialize WebSocket Manager
+        const wsManager = new WebSocketManager();
+
+        // TradingView Widget Setup
+        function initTradingView() {
+            try {
+                const tradingViewContainer = document.getElementById('tradingViewChart');
+                
+                if (!tradingViewContainer) {
+                    console.error('❌ TradingView container not found!');
+                    return;
+                }
+                
+                if (typeof TradingView === 'undefined') {
+                    console.error('❌ TradingView library not loaded!');
+                    createFallbackChart();
+                    return;
+                }
+                
+                console.log('📈 Initializing TradingView widget...');
+                
+                DashboardState.tvWidget = new TradingView.widget({
+                    autosize: true,
+                    symbol: `BINANCE:${DashboardState.currentSymbol}`,
+                    interval: "15",
+                    container_id: "tradingViewChart",
+                    library_path: "https://s3.tradingview.com/tv.js/",
+                    locale: "en",
+                    disabled_features: ["use_localstorage_for_settings"],
+                    enabled_features: ["study_templates"],
+                    charts_storage_url: null,
+                    charts_storage_api_version: "1.1",
+                    client_id: "tradingview.com",
+                    user_id: "public_user_id",
+                    fullscreen: false,
+                    autosize: true,
+                    theme: "dark",
+                    style: "1",
+                    timezone: "Etc/UTC",
+                    toolbar_bg: "#0f1729",
+                    enable_publishing: false,
+                    allow_symbol_change: true,
+                    container_id: "tradingViewChart"
+                });
+                
+                console.log('✅ TradingView widget initialized successfully');
+            } catch (error) {
+                console.error('❌ Error initializing TradingView widget:', error);
+                createFallbackChart();
+            }
+        }
+
+        // Fallback Chart (in case TradingView fails)
+        function createFallbackChart() {
+            const container = document.getElementById('tradingViewChart');
+            if (container) {
+                container.innerHTML = `
+                    <div style="display: flex; align-items: center; justify-content: center; height: 100%; flex-direction: column; gap: 1rem;">
+                        <i class="mdi mdi-chart-candlestick" style="font-size: 3rem; color: var(--primary);"></i>
+                        <h3 style="color: var(--text);">Chart Loading...</h3>
+                        <p style="color: var(--text-muted);">Please wait while we load the trading chart.</p>
+                    </div>
+                `;
+                
+                // Retry TradingView initialization after delay
+                setTimeout(() => {
+                    if (typeof TradingView !== 'undefined') {
+                        initTradingView();
+                    }
+                }, 3000);
+            }
+        }
+
+        // UI Update Functions
+        function updateConnectionStatus(status) {
+            try {
+                const indicator = document.getElementById('connectionStatus');
+                const text = document.getElementById('connectionText');
+                
+                if (!indicator || !text) {
+                    console.error('❌ Connection status elements not found!');
+                    return;
+                }
+                
+                indicator.className = `connection-status ${status}`;
+                
+                switch (status) {
+                    case 'connected':
+                        text.textContent = 'Connected';
+                        console.log('✅ WebSocket connected');
+                        break;
+                    case 'connecting':
+                        text.textContent = 'Connecting...';
+                        console.log('🔄 WebSocket connecting...');
+                        break;
+                    case 'disconnected':
+                        text.textContent = 'Disconnected';
+                        console.log('❌ WebSocket disconnected');
+                        break;
+                }
+            } catch (error) {
+                console.error('❌ Error updating connection status:', error);
+            }
+        }
+
+        function updateDashboardData(data) {
+            try {
+                console.log('📊 Updating dashboard data:', data);
+                
+                if (data.balance !== undefined) {
+                    const element = document.getElementById('totalBalance');
+                    if (element) {
+                        element.textContent = `$${data.balance.toLocaleString()}`;
+                    }
+                }
+                
+                if (data.pnl !== undefined) {
+                    const pnlElement = document.getElementById('todayPnL');
+                    if (pnlElement) {
+                        const formattedPnL = data.pnl >= 0 ? `+$${data.pnl.toFixed(2)}` : `-$${Math.abs(data.pnl).toFixed(2)}`;
+                        pnlElement.textContent = formattedPnL;
+                        pnlElement.style.color = data.pnl >= 0 ? 'var(--success)' : 'var(--danger)';
+                    }
+                }
+                
+                if (data.open_positions !== undefined) {
+                    const element = document.getElementById('openPositions');
+                    if (element) {
+                        element.textContent = data.open_positions;
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Error updating dashboard data:', error);
+            }
+        }
+
+        // Trading Functions
+        function executeTrade(side) {
+            const symbol = document.getElementById('symbolSelect').value;
+            const orderType = document.getElementById('orderType').value;
+            const quantity = document.getElementById('quantity').value;
+            const price = document.getElementById('price').value;
+
+            if (!quantity) {
+                showAlert('Please enter quantity', 'warning');
+                return;
+            }
+
+            if (orderType === 'limit' && !price) {
+                showAlert('Please enter price for limit order', 'warning');
+                return;
+            }
+
+            const orderData = {
+                type: 'place_order',
+                symbol: symbol,
+                side: side,
+                orderType: orderType,
+                quantity: parseFloat(quantity),
+                price: orderType === 'limit' ? parseFloat(price) : null
+            };
+
+            wsManager.send(orderData);
+            showAlert(`${side.toUpperCase()} order submitted for ${quantity} ${symbol}`, 'info');
+            
+            console.log('📤 Order submitted:', orderData);
+        }
+
+        function updateRiskSettings() {
+            const stopLoss = document.getElementById('stopLoss').value;
+            const takeProfit = document.getElementById('takeProfit').value;
+
+            const riskData = {
+                type: 'update_risk_settings',
+                stopLoss: stopLoss ? parseFloat(stopLoss) : null,
+                takeProfit: takeProfit ? parseFloat(takeProfit) : null
+            };
+
+            wsManager.send(riskData);
+            showAlert('Risk settings updated', 'success');
+            
+            console.log('📤 Risk settings updated:', riskData);
+        }
+
+        // Alert System
+        function showAlert(message, type = 'info') {
+            const alert = document.createElement('div');
+            alert.className = `alert ${type}`;
+            alert.textContent = message;
+            
+            document.body.appendChild(alert);
+            
+            setTimeout(() => {
+                alert.style.animation = 'slideIn 0.3s ease reverse';
+                setTimeout(() => alert.remove(), 300);
+            }, 3000);
+        }
+
+        // Event Listeners
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Dashboard initialization starting...');
+            
+            // Hide loading overlay after initialization
+            setTimeout(() => {
+                document.getElementById('loadingOverlay').classList.add('hidden');
+            }, 1000);
+
+            // Initialize TradingView
+            setTimeout(() => {
+                initTradingView();
+            }, 1500);
+
+            // Connect WebSocket
+            setTimeout(() => {
+                wsManager.connect();
+            }, 2000);
+
+            // Setup order type toggle
+            document.getElementById('orderType').addEventListener('change', function() {
+                const priceGroup = document.getElementById('priceGroup');
+                if (this.value === 'limit') {
+                    priceGroup.style.display = 'flex';
+                } else {
+                    priceGroup.style.display = 'none';
+                }
+            });
+
+            // Setup symbol change
+            document.getElementById('symbolSelect').addEventListener('change', function() {
+                DashboardState.currentSymbol = this.value;
+                if (DashboardState.tvWidget) {
+                    try {
+                        DashboardState.tvWidget.setSymbol(`BINANCE:${this.value}`, '15');
+                    } catch (e) {
+                        console.error('Error changing symbol:', e);
+                    }
+                }
+                showAlert(`Symbol changed to ${this.value}`, 'info');
+            });
+
+            // Setup navigation
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.addEventListener('click', function() {
+                    document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+                    this.classList.add('active');
+                    const section = this.dataset.section;
+                    showAlert(`Navigated to ${section.charAt(0).toUpperCase() + section.slice(1)}`, 'info');
+                });
+            });
+
+            console.log('✅ Dashboard initialization complete!');
+        });
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', function() {
+            wsManager.disconnect();
+        });
+
+        console.log('🎯 Ultimate Trading Dashboard - Unified Version Loaded!');
+    </script>
+</body>
+</html>

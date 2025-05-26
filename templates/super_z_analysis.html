@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Super Z Pullback Analysis</title>
+    
+    <!-- External Libraries -->
+    <link href="https://cdn.jsdelivr.net/npm/@mdi/font@7.2.96/css/materialdesignicons.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.3.0/dist/chart.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/date-fns@2.29.3/index.min.js"></script>
+    
+    <style>
+        :root {
+            --primary: #2563eb;
+            --primary-dark: #1d4ed8;
+            --success: #059669;
+            --danger: #dc2626;
+            --warning: #d97706;
+            --info: #0ea5e9;
+            --background: #0f172a;
+            --surface: #1e293b;
+            --surface-light: #334155;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: #475569;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--background);
+            color: var(--text);
+            line-height: 1.6;
+        }
+
+        .header {
+            background: var(--surface);
+            padding: 1rem 2rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary);
+        }
+
+        .header .controls {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: background-color 0.2s;
+        }
+
+        .btn:hover {
+            background: var(--primary-dark);
+        }
+
+        .btn-success {
+            background: var(--success);
+        }
+
+        .btn-danger {
+            background: var(--danger);
+        }
+
+        .btn-warning {
+            background: var(--warning);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .grid {
+            display: grid;
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .grid-2 {
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        }
+
+        .grid-3 {
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        }
+
+        .card {
+            background: var(--surface);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            border: 1px solid var(--border);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .metric:last-child {
+            border-bottom: none;
+        }
+
+        .metric-label {
+            color: var(--text-muted);
+        }
+
+        .metric-value {
+            font-weight: 600;
+        }
+
+        .metric-value.positive {
+            color: var(--success);
+        }
+
+        .metric-value.negative {
+            color: var(--danger);
+        }
+
+        .metric-value.warning {
+            color: var(--warning);
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px;
+            margin-top: 1rem;
+        }
+
+        .chart-container.large {
+            height: 400px;
+        }
+
+        .loading {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 200px;
+            color: var(--text-muted);
+        }
+
+        .spinner {
+            width: 2rem;
+            height: 2rem;
+            border: 2px solid var(--border);
+            border-top: 2px solid var(--primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .symbol-selector {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .symbol-btn {
+            background: var(--surface-light);
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            transition: all 0.2s;
+        }
+
+        .symbol-btn.active {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .symbol-btn:hover {
+            background: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-confirmed {
+            background: rgba(5, 150, 105, 0.2);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+
+        .status-partial {
+            background: rgba(217, 119, 6, 0.2);
+            color: var(--warning);
+            border: 1px solid var(--warning);
+        }
+
+        .status-none {
+            background: rgba(220, 38, 38, 0.2);
+            color: var(--danger);
+            border: 1px solid var(--danger);
+        }
+
+        .signal-list {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .signal-item {
+            background: var(--surface-light);
+            border-radius: 0.375rem;
+            padding: 1rem;
+            margin-bottom: 0.5rem;
+            border-left: 4px solid;
+        }
+
+        .signal-item.long {
+            border-left-color: var(--success);
+        }
+
+        .signal-item.short {
+            border-left-color: var(--danger);
+        }
+
+        .signal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .signal-type {
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        .signal-time {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+        }
+
+        .signal-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.5rem;
+            font-size: 0.75rem;
+        }
+
+        .detail-item {
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 0.375rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid;
+        }
+
+        .alert-info {
+            background: rgba(14, 165, 233, 0.1);
+            border-left-color: var(--info);
+            color: var(--info);
+        }
+
+        .alert-success {
+            background: rgba(5, 150, 105, 0.1);
+            border-left-color: var(--success);
+            color: var(--success);
+        }
+
+        .alert-warning {
+            background: rgba(217, 119, 6, 0.1);
+            border-left-color: var(--warning);
+            color: var(--warning);
+        }
+
+        .alert-danger {
+            background: rgba(220, 38, 38, 0.1);
+            border-left-color: var(--danger);
+            color: var(--danger);
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>
+            <i class="mdi mdi-chart-line"></i>
+            Super Z Pullback Analysis
+        </h1>
+        <div class="controls">
+            <select id="timeframeSelect" class="btn">
+                <option value="1h">1 Hour</option>
+                <option value="4h" selected>4 Hour</option>
+                <option value="1d">1 Day</option>
+            </select>
+            <button id="runAnalysisBtn" class="btn">
+                <i class="mdi mdi-play"></i>
+                Run Analysis
+            </button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Status Alert -->
+        <div id="statusAlert" class="alert alert-info" style="display: none;">
+            <strong>Analysis Status:</strong> <span id="statusText">Ready to analyze</span>
+        </div>
+
+        <!-- Symbol Selector -->
+        <div class="card">
+            <div class="card-title">Select Symbols to Analyze</div>
+            <div class="symbol-selector" id="symbolSelector">
+                <button class="symbol-btn active" data-symbol="BTCUSDT">BTC</button>
+                <button class="symbol-btn active" data-symbol="ETHUSDT">ETH</button>
+                <button class="symbol-btn active" data-symbol="ADAUSDT">ADA</button>
+                <button class="symbol-btn active" data-symbol="SOLUSDT">SOL</button>
+                <button class="symbol-btn active" data-symbol="DOTUSDT">DOT</button>
+                <button class="symbol-btn" data-symbol="MATICUSDT">MATIC</button>
+                <button class="symbol-btn" data-symbol="LINKUSDT">LINK</button>
+                <button class="symbol-btn" data-symbol="AVAXUSDT">AVAX</button>
+            </div>
+        </div>
+
+        <!-- Overall Summary -->
+        <div class="grid grid-3">
+            <div class="card">
+                <div class="card-title">Overall Pattern Status</div>
+                <div id="patternStatus" class="status-indicator status-none">
+                    <i class="mdi mdi-help-circle"></i>
+                    Not Analyzed
+                </div>
+                <div class="chart-container">
+                    <canvas id="overallChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Key Metrics</div>
+                <div id="keyMetrics">
+                    <div class="metric">
+                        <span class="metric-label">Total Signals</span>
+                        <span class="metric-value" id="totalSignals">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Pullback Rate</span>
+                        <span class="metric-value" id="pullbackRate">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Avg Pullback %</span>
+                        <span class="metric-value" id="avgPullback">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Red VHMA Rate</span>
+                        <span class="metric-value" id="redVhmaRate">-</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Recovery Rate</span>
+                        <span class="metric-value" id="recoveryRate">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Pattern Insights</div>
+                <div id="insights">
+                    <div class="loading">
+                        <i class="mdi mdi-information"></i>
+                        Run analysis to see insights
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-2">
+            <div class="card">
+                <div class="card-title">Pullback Distribution</div>
+                <div class="chart-container">
+                    <canvas id="pullbackChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-title">Signal Type Analysis</div>
+                <div class="chart-container">
+                    <canvas id="signalTypeChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Per-Symbol Results -->
+        <div class="card">
+            <div class="card-title">Per-Symbol Results</div>
+            <div id="symbolResults" class="grid grid-2">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    No analysis data yet
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Signals -->
+        <div class="card">
+            <div class="card-title">Recent Signals & Pullbacks</div>
+            <div id="recentSignals" class="signal-list">
+                <div class="loading">
+                    <i class="mdi mdi-clock"></i>
+                    No signals analyzed yet
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class SuperZPullbackAnalyzer {
+            constructor() {
+                this.results = {};
+                this.charts = {};
+                this.isAnalyzing = false;
+                this.init();
+            }
+
+            init() {
+                this.setupEventListeners();
+                this.initializeCharts();
+            }
+
+            setupEventListeners() {
+                document.getElementById('runAnalysisBtn').addEventListener('click', () => {
+                    this.runAnalysis();
+                });
+
+                // Symbol selector
+                document.querySelectorAll('.symbol-btn').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.target.classList.toggle('active');
+                    });
+                });
+            }
+
+            initializeCharts() {
+                // Overall pattern chart
+                const overallCtx = document.getElementById('overallChart').getContext('2d');
+                this.charts.overall = new Chart(overallCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Signals with Pullbacks', 'Signals without Pullbacks'],
+                        datasets: [{
+                            data: [0, 100],
+                            backgroundColor: ['#dc2626', '#374151'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                                labels: { color: '#f8fafc' }
+                            }
+                        }
+                    }
+                });
+
+                // Pullback distribution chart
+                const pullbackCtx = document.getElementById('pullbackChart').getContext('2d');
+                this.charts.pullback = new Chart(pullbackCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Frequency',
+                            data: [],
+                            backgroundColor: '#2563eb',
+                            borderColor: '#1d4ed8',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { labels: { color: '#f8fafc' } }
+                        },
+                        scales: {
+                            x: { 
+                                ticks: { color: '#94a3b8' },
+                                grid: { color: '#475569' }
+                            },
+                            y: { 
+                                ticks: { color: '#94a3b8' },
+                                grid: { color: '#475569' }
+                            }
+                        }
+                    }
+                });
+
+                // Signal type comparison chart
+                const signalCtx = document.getElementById('signalTypeChart').getContext('2d');
+                this.charts.signalType = new Chart(signalCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Long Signals', 'Short Signals'],
+                        datasets: [
+                            {
+                                label: 'Pullback Rate',
+                                data: [0, 0],
+                                backgroundColor: ['#059669', '#dc2626'],
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Recovery Rate',
+                                data: [0, 0],
+                                backgroundColor: ['#0ea5e9', '#f59e0b'],
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { labels: { color: '#f8fafc' } }
+                        },
+                        scales: {
+                            x: { 
+                                ticks: { color: '#94a3b8' },
+                                grid: { color: '#475569' }
+                            },
+                            y: { 
+                                ticks: { color: '#94a3b8' },
+                                grid: { color: '#475569' },
+                                max: 1
+                            }
+                        }
+                    }
+                });
+            }
+
+            async runAnalysis() {
+                if (this.isAnalyzing) return;
+
+                this.isAnalyzing = true;
+                this.showStatus('Running pullback analysis...', 'info');
+                
+                const btn = document.getElementById('runAnalysisBtn');
+                btn.innerHTML = '<div class="spinner"></div> Analyzing...';
+                btn.disabled = true;
+
+                try {
+                    // Get selected symbols
+                    const selectedSymbols = Array.from(document.querySelectorAll('.symbol-btn.active'))
+                        .map(btn => btn.dataset.symbol);
+
+                    const timeframe = document.getElementById('timeframeSelect').value;
+
+                    // Make API call to backend
+                    const response = await fetch('/api/super-z-analysis', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            symbols: selectedSymbols,
+                            timeframe: timeframe,
+                            days: 30
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const results = await response.json();
+                    this.results = results;
+                    this.updateDisplay(results);
+                    this.showStatus('Analysis completed successfully!', 'success');
+
+                } catch (error) {
+                    console.error('Analysis error:', error);
+                    this.showStatus(`Analysis failed: ${error.message}`, 'danger');
+                } finally {
+                    this.isAnalyzing = false;
+                    btn.innerHTML = '<i class="mdi mdi-play"></i> Run Analysis';
+                    btn.disabled = false;
+                }
+            }
+
+            updateDisplay(results) {
+                this.updateOverallMetrics(results);
+                this.updateCharts(results);
+                this.updateSymbolResults(results);
+                this.updateRecentSignals(results);
+                this.updateInsights(results);
+            }
+
+            updateOverallMetrics(results) {
+                const summary = results.summary || {};
+                
+                document.getElementById('totalSignals').textContent = summary.total_signals || 0;
+                document.getElementById('pullbackRate').textContent = 
+                    summary.pullback_rate ? `${(summary.pullback_rate * 100).toFixed(1)}%` : '-';
+                document.getElementById('avgPullback').textContent = 
+                    summary.avg_pullback ? `${summary.avg_pullback.toFixed(2)}%` : '-';
+                document.getElementById('redVhmaRate').textContent = 
+                    summary.red_vhma_rate ? `${(summary.red_vhma_rate * 100).toFixed(1)}%` : '-';
+                document.getElementById('recoveryRate').textContent = 
+                    summary.recovery_rate ? `${(summary.recovery_rate * 100).toFixed(1)}%` : '-';
+
+                // Update pattern status
+                const patternStatus = document.getElementById('patternStatus');
+                const pullbackRate = summary.pullback_rate || 0;
+                
+                if (pullbackRate > 0.7) {
+                    patternStatus.className = 'status-indicator status-confirmed';
+                    patternStatus.innerHTML = '<i class="mdi mdi-check-circle"></i> Pattern Confirmed';
+                } else if (pullbackRate > 0.4) {
+                    patternStatus.className = 'status-indicator status-partial';
+                    patternStatus.innerHTML = '<i class="mdi mdi-alert-circle"></i> Partial Pattern';
+                } else {
+                    patternStatus.className = 'status-indicator status-none';
+                    patternStatus.innerHTML = '<i class="mdi mdi-close-circle"></i> No Clear Pattern';
+                }
+            }
+
+            updateCharts(results) {
+                const summary = results.summary || {};
+                
+                // Update overall chart
+                const pullbackRate = summary.pullback_rate || 0;
+                this.charts.overall.data.datasets[0].data = [
+                    pullbackRate * 100,
+                    (1 - pullbackRate) * 100
+                ];
+                this.charts.overall.update();
+
+                // Update pullback distribution if available
+                if (results.pullback_distribution) {
+                    this.charts.pullback.data.labels = results.pullback_distribution.labels;
+                    this.charts.pullback.data.datasets[0].data = results.pullback_distribution.data;
+                    this.charts.pullback.update();
+                }
+
+                // Update signal type chart
+                if (summary.long_pullback_rate !== undefined && summary.short_pullback_rate !== undefined) {
+                    this.charts.signalType.data.datasets[0].data = [
+                        summary.long_pullback_rate,
+                        summary.short_pullback_rate
+                    ];
+                    this.charts.signalType.data.datasets[1].data = [
+                        summary.long_recovery_rate || 0,
+                        summary.short_recovery_rate || 0
+                    ];
+                    this.charts.signalType.update();
+                }
+            }
+
+            updateSymbolResults(results) {
+                const container = document.getElementById('symbolResults');
+                container.innerHTML = '';
+
+                if (!results.symbols || Object.keys(results.symbols).length === 0) {
+                    container.innerHTML = '<div class="loading">No symbol data available</div>';
+                    return;
+                }
+
+                Object.entries(results.symbols).forEach(([symbol, data]) => {
+                    const symbolCard = document.createElement('div');
+                    symbolCard.className = 'card';
+                    symbolCard.innerHTML = `
+                        <div class="card-title">${symbol}</div>
+                        <div class="metric">
+                            <span class="metric-label">Signals</span>
+                            <span class="metric-value">${data.total_signals || 0}</span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Pullback Rate</span>
+                            <span class="metric-value ${data.pullback_rate > 0.6 ? 'positive' : 'negative'}">
+                                ${data.pullback_rate ? `${(data.pullback_rate * 100).toFixed(1)}%` : '-'}
+                            </span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Avg Pullback</span>
+                            <span class="metric-value warning">
+                                ${data.avg_pullback ? `${data.avg_pullback.toFixed(2)}%` : '-'}
+                            </span>
+                        </div>
+                        <div class="metric">
+                            <span class="metric-label">Recovery Rate</span>
+                            <span class="metric-value ${data.recovery_rate > 0.6 ? 'positive' : 'negative'}">
+                                ${data.recovery_rate ? `${(data.recovery_rate * 100).toFixed(1)}%` : '-'}
+                            </span>
+                        </div>
+                    `;
+                    container.appendChild(symbolCard);
+                });
+            }
+
+            updateRecentSignals(results) {
+                const container = document.getElementById('recentSignals');
+                container.innerHTML = '';
+
+                if (!results.recent_signals || results.recent_signals.length === 0) {
+                    container.innerHTML = '<div class="loading">No recent signals found</div>';
+                    return;
+                }
+
+                results.recent_signals.slice(0, 10).forEach(signal => {
+                    const signalItem = document.createElement('div');
+                    signalItem.className = `signal-item ${signal.type.toLowerCase()}`;
+                    signalItem.innerHTML = `
+                        <div class="signal-header">
+                            <span class="signal-type">${signal.symbol} ${signal.type}</span>
+                            <span class="signal-time">${new Date(signal.time).toLocaleString()}</span>
+                        </div>
+                        <div class="signal-details">
+                            <div class="detail-item">
+                                <span>Price:</span>
+                                <span>$${signal.price?.toFixed(4) || 'N/A'}</span>
+                            </div>
+                            <div class="detail-item">
+                                <span>Pullback:</span>
+                                <span class="warning">${signal.pullback_pct?.toFixed(2) || 0}%</span>
+                            </div>
+                            <div class="detail-item">
+                                <span>Red VHMA:</span>
+                                <span>${signal.red_vhma_candles || 0} candles</span>
+                            </div>
+                            <div class="detail-item">
+                                <span>Recovered:</span>
+                                <span class="${signal.recovered ? 'positive' : 'negative'}">
+                                    ${signal.recovered ? 'Yes' : 'No'}
+                                </span>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(signalItem);
+                });
+            }
+
+            updateInsights(results) {
+                const container = document.getElementById('insights');
+                const summary = results.summary || {};
+                
+                const insights = [];
+                
+                const pullbackRate = summary.pullback_rate || 0;
+                const avgPullback = summary.avg_pullback || 0;
+                const redVhmaRate = summary.red_vhma_rate || 0;
+                const recoveryRate = summary.recovery_rate || 0;
+
+                if (pullbackRate > 0.7) {
+                    insights.push({
+                        type: 'success',
+                        icon: 'check-circle',
+                        text: `Strong pullback pattern detected (${(pullbackRate * 100).toFixed(1)}% of signals)`
+                    });
+                }
+
+                if (redVhmaRate > 0.6) {
+                    insights.push({
+                        type: 'info',
+                        icon: 'information',
+                        text: `Red VHMA correlation confirmed (${(redVhmaRate * 100).toFixed(1)}% of pullbacks)`
+                    });
+                }
+
+                if (avgPullback > 3) {
+                    insights.push({
+                        type: 'warning',
+                        icon: 'alert-triangle',
+                        text: `Significant pullbacks detected - average ${avgPullback.toFixed(1)}%. Consider wider stops.`
+                    });
+                }
+
+                if (recoveryRate > 0.7) {
+                    insights.push({
+                        type: 'success',
+                        icon: 'trending-up',
+                        text: `High recovery rate (${(recoveryRate * 100).toFixed(1)}%) - pullbacks may be buyable`
+                    });
+                }
+
+                if (insights.length === 0) {
+                    insights.push({
+                        type: 'info',
+                        icon: 'help-circle',
+                        text: 'No clear pattern detected. More data may be needed.'
+                    });
+                }
+
+                container.innerHTML = insights.map(insight => `
+                    <div class="alert alert-${insight.type}">
+                        <i class="mdi mdi-${insight.icon}"></i>
+                        ${insight.text}
+                    </div>
+                `).join('');
+            }
+
+            showStatus(message, type) {
+                const alert = document.getElementById('statusAlert');
+                const text = document.getElementById('statusText');
+                
+                alert.className = `alert alert-${type}`;
+                alert.style.display = 'block';
+                text.textContent = message;
+
+                if (type === 'success') {
+                    setTimeout(() => {
+                        alert.style.display = 'none';
+                    }, 5000);
+                }
+            }
+        }
+
+        // Initialize the analyzer when DOM is loaded
+        document.addEventListener('DOMContentLoaded', () => {
+            new SuperZPullbackAnalyzer();
+        });
+    </script>
+</body>
+</html>

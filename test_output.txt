@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\Letme\BACKTESTER\tests\test_auth_service.py", line 9, in <module>
+    from services.auth_service import AuthenticationService, auth_service
+ModuleNotFoundError: No module named 'services'

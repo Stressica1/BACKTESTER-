@@ -1,0 +1,194 @@
+# Overview  
+The Trading Bot Dashboard with Backtesting is a comprehensive platform for cryptocurrency traders. It provides a unified interface for backtesting trading strategies, monitoring market volatility, and executing trades. The platform integrates with exchanges through APIs, supports integration with TradingView alerts, and includes advanced risk management features.
+
+# Core Features  
+1. Backtesting Engine
+   - Allows testing trading strategies against historical data
+   - Supports multiple timeframes (5m, 15m, 1h, 4h, 1d)
+   - Includes optimization capabilities using Optuna
+   - Calculates performance metrics like Sharpe ratio, max drawdown, and win rate
+
+2. Volatility Scanner
+   - Identifies volatile cryptocurrencies on exchanges
+   - Calculates multiple volatility metrics (ATR, historical volatility, realized volatility)
+   - Ranks coins by appeal score for trading opportunities
+   - Supports multiple timeframes for analysis
+
+3. Risk Management System
+   - Manages position sizing based on account balance
+   - Implements stop loss and take profit mechanisms
+   - Sets maximum drawdown limits
+   - Controls maximum number of open trades
+
+4. Trading Dashboard
+   - Provides real-time market data visualization
+   - Displays performance metrics for active and past trades
+   - Offers dark/light theme options
+   - Features responsive design for various devices
+
+5. TradingView Integration
+   - Accepts webhook alerts from TradingView
+   - Processes alert data to trigger trades
+   - Supports custom alert formats
+
+# User Experience  
+- Target Users: Cryptocurrency traders, algorithmic traders, and trading strategy developers
+- Key User Flows:
+  1. Configure and run backtests to evaluate strategy performance
+  2. Scan markets for volatile trading opportunities
+  3. Set up and monitor live trading with risk parameters
+  4. Integrate with TradingView for external alerts
+# Technical Architecture  
+## System Components
+1. Backend Services:
+   - FastAPI web server for API endpoints and HTML rendering
+   - Asynchronous data fetching from exchanges via CCXT
+   - Backtesting engine for strategy evaluation
+   - Volatility calculation module
+   - Risk management system
+
+2. Frontend Interface:
+   - Jinja2 templates for server-side rendering
+   - Dashboard with interactive charts and controls
+   - Configuration interfaces for strategy parameters
+   - Results visualization for backtests
+
+3. Data Management:
+   - Historical price data retrieval and caching
+   - Real-time market data processing
+   - Trade logging and performance tracking
+
+4. External Integrations:
+   - Exchange API connections (via CCXT)
+   - TradingView webhook handling
+   - Ngrok for public webhook endpoints
+
+## Data Models
+1. Strategy Configuration:
+   - Entry/exit conditions
+   - Technical indicator parameters
+   - Timeframe settings
+
+2. Backtest Results:
+   - Trade history (entry/exit points, P&L)
+   - Performance metrics
+   - Equity curve data
+
+3. Volatility Metrics:
+   - Multiple volatility calculations per asset
+   - Historical volatility patterns
+   - Asset rankings and appeal scores
+
+4. Risk Parameters:
+   - Position sizing rules
+   - Stop loss/take profit settings
+   - Maximum drawdown thresholds
+
+## APIs and Integrations
+1. Internal APIs:
+   - Backtest execution and results retrieval
+   - Volatility scanning and ranking
+   - Configuration management
+
+2. External APIs:
+   - Exchange connections for market data and trading
+   - Webhook endpoint for TradingView alerts
+
+## Infrastructure Requirements
+1. Server:
+   - Python environment (3.8+)
+   - FastAPI and Uvicorn for web service
+   - Asynchronous processing capabilities
+
+2. Networking:
+   - Ngrok for public webhook exposure
+   - Websocket connections for real-time data
+
+# Development Roadmap  
+## Phase 1: Core Backend Infrastructure
+1. Data fetching module for historical and real-time market data
+2. Basic backtesting engine with essential technical indicators
+3. Simple risk management system with position sizing
+4. Basic API endpoints for system interaction
+
+## Phase 2: Volatility Scanner Enhancement
+1. Comprehensive volatility metrics calculation
+2. Market scanning across multiple timeframes
+3. Asset ranking by appeal score
+4. Optimization for efficient data processing and caching
+
+## Phase 3: Advanced Backtesting Features
+1. Parameter optimization using Optuna
+2. Additional technical indicators
+3. Enhanced performance metrics
+4. Improved visualization of backtest results
+
+## Phase 4: Web Dashboard Implementation
+1. Basic dashboard layout with dark/light theme
+2. Interactive charts for market data and performance
+3. Configuration interfaces for strategies and risk parameters
+4. Results visualization for backtests and volatility scans
+
+## Phase 5: Integration and Advanced Features
+1. TradingView webhook integration
+2. Real-time trading capabilities
+3. Enhanced risk management features
+4. System monitoring and alerts
+
+# Logical Dependency Chain
+1. Foundation Components:
+   - Data fetching module must be developed first to provide market data
+   - Basic backtesting engine depends on data fetching
+   - Risk management system integrates with both
+
+2. Progressive Enhancement:
+   - Start with basic volatility metrics before implementing complex calculations
+   - Implement essential technical indicators before advanced ones
+   - Build simple backtest visualization before complex interactive charts
+
+3. Integration Order:
+   - Develop core functionality before external integrations
+   - Implement API endpoints before building UI components
+   - Add optimization features after basic functionality is stable
+
+# Risks and Mitigations  
+## Technical Challenges
+1. Risk: High-volume data processing may cause performance issues
+   Mitigation: Implement efficient caching and data sampling
+
+2. Risk: Real-time trading requires high reliability
+   Mitigation: Comprehensive error handling and fallback mechanisms
+
+3. Risk: Exchange API limits may restrict data fetching
+   Mitigation: Rate limiting, request batching, and data caching
+
+## MVP Concerns
+1. Risk: Scope creep may delay usable product
+   Mitigation: Clearly define MVP features and prioritize core functionality
+
+2. Risk: Complex UI may slow development
+   Mitigation: Start with basic, functional UI and enhance incrementally
+
+## Resource Constraints
+1. Risk: Complex calculations may require significant computational resources
+   Mitigation: Optimize algorithms and implement background processing
+
+2. Risk: Concurrent users may overload the system
+   Mitigation: Implement rate limiting and load balancing
+
+# Appendix  
+## Key Libraries and Dependencies
+- CCXT for exchange connectivity
+- FastAPI for web server
+- Backtrader for backtesting
+- Optuna for hyperparameter optimization
+- TA-Lib for technical analysis
+- Pandas and NumPy for data manipulation
+- Jinja2 for templating
+
+## Development Best Practices
+- Prioritize asynchronous operations for improved performance
+- Implement comprehensive error handling
+- Use caching strategies to reduce API calls
+- Maintain clear separation of concerns in architecture
+</PRD>
