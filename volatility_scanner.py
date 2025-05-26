@@ -126,7 +126,7 @@ class VolatilityScanner:
         logging.basicConfig(level=logging.INFO)
         
         # Timeframes to analyze
-        self.timeframes = ['4h']  # Focus on single timeframe for speed
+        self.timeframes = ['5m', '15m', '30m']  # Analyze 5, 15, and 30 minute intervals
         
         # Volatility calculation parameters
         self.atr_period = 14
