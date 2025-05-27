@@ -1,118 +1,69 @@
 ---
-description: 
+description: Bitget USDT-M Futures API endpoints and CCXT integration guide
 globs: 
 alwaysApply: true
 ---
-# Phemex USDT-M and CCXT Endpoints
+# Bitget USDT-M Futures and CCXT Endpoints
 
-## Phemex Main Parent Links
+## Bitget Main Parent Links
 
 ### Production Environment
-- REST API: `https://api.phemex.com`
-- WebSocket: `wss://phemex.com/ws`
+- REST API: `https://api.bitget.com`
+- WebSocket: `wss://stream.bitget.com`
 
 ### Testnet Environment
-- REST API: `https://testnet-api.phemex.com`
-- WebSocket: `wss://testnet.phemex.com/ws`
+- REST API: `https://api.bitgetapi.com` (testnet)
+- WebSocket: `wss://testnet-stream.bitget.com`
 
-## Phemex REST API v1 Endpoints
-
-### Public Endpoints
-
-#### Market Data
-- `https://api.phemex.com/v1/exchange/public/products`
-- `https://api.phemex.com/v1/md/orderbook`
-- `https://api.phemex.com/v1/md/trade`
-- `https://api.phemex.com/v1/md/spot/ticker/24hr`
-- `https://api.phemex.com/v1/md/kline`
-- `https://api.phemex.com/v1/time`
-
-### Private Endpoints
-
-#### Account
-- `https://api.phemex.com/v1/accounts/accountPositions`
-- `https://api.phemex.com/v1/accounts/leverage`
-- `https://api.phemex.com/v1/accounts/riskLimit`
-
-#### Orders
-- `https://api.phemex.com/v1/orders`
-- `https://api.phemex.com/v1/orders/activeList`
-- `https://api.phemex.com/v1/orders/historyList`
-- `https://api.phemex.com/v1/orders/all`
-
-#### Positions
-- `https://api.phemex.com/v1/positions`
-- `https://api.phemex.com/v1/positions/margin`
-
-#### Trading History
-- `https://api.phemex.com/v1/trades`
-
-## Phemex REST API v2 Endpoints
+## Bitget REST API v1 Endpoints
 
 ### Public Endpoints
 
 #### Market Data
-- `https://api.phemex.com/v2/public/products`
-- `https://api.phemex.com/v2/md/orderbook`
-- `https://api.phemex.com/v2/md/trade`
-- `https://api.phemex.com/v2/public/ticker/24hr`
-- `https://api.phemex.com/v2/public/kline/list`
+- `https://api.bitget.com/api/mix/v1/market/contracts`
+- `https://api.bitget.com/api/mix/v1/market/depth`
+- `https://api.bitget.com/api/mix/v1/market/ticker`
+- `https://api.bitget.com/api/mix/v1/market/tickers`
+- `https://api.bitget.com/api/mix/v1/market/candles`
+- `https://api.bitget.com/api/mix/v1/market/fills`
 
 ### Private Endpoints
 
 #### Account
-- `https://api.phemex.com/v2/accounts/accountPositions`
-- `https://api.phemex.com/v2/assets/wallets/detail/history/list`
-- `https://api.phemex.com/v2/assets/wallets/transfer/history/list`
+- `https://api.bitget.com/api/mix/v1/account/account`
+- `https://api.bitget.com/api/mix/v1/account/accounts`
+- `https://api.bitget.com/api/mix/v1/position/allPosition`
+- `https://api.bitget.com/api/mix/v1/position/singlePosition`
 
 #### Orders
-- `https://api.phemex.com/v2/orders`
-- `https://api.phemex.com/v2/orders/activeList`
-- `https://api.phemex.com/v2/orders/historyList`
-- `https://api.phemex.com/v2/orders/all`
+- `https://api.bitget.com/api/mix/v1/order/placeOrder`
+- `https://api.bitget.com/api/mix/v1/order/current`
+- `https://api.bitget.com/api/mix/v1/order/history`
+- `https://api.bitget.com/api/mix/v1/order/fills`
+- `https://api.bitget.com/api/mix/v1/order/cancel-order`
 
-#### Positions
-- `https://api.phemex.com/v2/positions`
-- `https://api.phemex.com/v2/positions/leverage`
+#### Risk Management
+- `https://api.bitget.com/api/mix/v1/account/setLeverage`
+- `https://api.bitget.com/api/mix/v1/account/setMargin`
+- `https://api.bitget.com/api/mix/v1/account/setMarginMode`
 
-#### Trading History
-- `https://api.phemex.com/v2/trades`
-
-## Phemex WebSocket v1 Endpoints
-
-### Connection
-- `wss://phemex.com/ws`
-- `wss://testnet.phemex.com/ws`
-
-### Public Channels
-- `book.{symbol}`
-- `trades.{symbol}`
-- `kline.{resolution}.{symbol}`
-- `ticker.{symbol}`
-
-### Private Channels
-- `aop.{currency}`
-- `order.{symbol}`
-- `trade.{symbol}`
-- `wallet.{currency}`
-
-## Phemex WebSocket v2 Endpoints
+## Bitget WebSocket Endpoints
 
 ### Connection
-- `wss://phemex.com/ws`
-- `wss://testnet.phemex.com/ws`
+- `wss://stream.bitget.com/mix/v1/stream`
+- `wss://testnet-stream.bitget.com/mix/v1/stream` (testnet)
 
 ### Public Channels
-- `orderbook.{symbol}`
-- `market_trades.{symbol}`
-- `candlestick.{resolution}.{symbol}`
-- `market_ticker.{symbol}`
+- `ticker` - Real-time ticker data
+- `depth` - Order book updates
+- `candle15m` - 15-minute candlestick data
+- `candle1H` - 1-hour candlestick data
+- `trade` - Recent trades
 
 ### Private Channels
-- `position.{symbol}`
-- `order.{symbol}`
-- `usertrade.{symbol}`
-- `wallet.{currency}`
+- `account` - Account balance updates
+- `positions` - Position updates
+- `orders` - Order status updates
 
 ## CCXT Integration Endpoints
 
@@ -120,69 +71,61 @@ alwaysApply: true
 - CCXT GitHub: `https://github.com/ccxt/ccxt`
 - CCXT Documentation: `https://docs.ccxt.com`
 
-### Phemex-Specific CCXT Endpoints
+### Bitget-Specific CCXT Endpoints
 
 #### Exchange Definition
-- `https://github.com/ccxt/ccxt/blob/master/js/phemex.js`
-- `https://github.com/ccxt/ccxt/blob/master/python/ccxt/phemex.py`
-
-#### Authentication
-- `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1134` (JavaScript)
-- `https://github.com/ccxt/ccxt/blob/master/python/ccxt/phemex.py#L1134` (Python)
+- `https://github.com/ccxt/ccxt/blob/master/js/bitget.js`
+- `https://github.com/ccxt/ccxt/blob/master/python/ccxt/bitget.py`
 
 #### Market Methods
-- `fetchMarkets`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1250`
-- `fetchTicker`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1388`
-- `fetchOHLCV`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1523`
-- `fetchOrderBook`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1473`
-- `fetchTrades`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1553`
+- `fetchMarkets` - Get all available trading pairs
+- `fetchTicker` - Get 24hr ticker statistics
+- `fetchOHLCV` - Get candlestick/kline data
+- `fetchOrderBook` - Get order book depth
+- `fetchTrades` - Get recent trades
 
 #### Trading Methods
-- `createOrder`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1623`
-- `cancelOrder`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1693`
-- `fetchOrder`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1741`
-- `fetchOpenOrders`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1780`
-- `fetchClosedOrders`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1815`
-- `fetchMyTrades`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1847`
+- `createOrder` - Place new order
+- `cancelOrder` - Cancel existing order
+- `fetchOrder` - Get order status
+- `fetchOpenOrders` - Get all open orders
+- `fetchClosedOrders` - Get order history
+- `fetchMyTrades` - Get trade history
 
 #### Account Methods
-- `fetchBalance`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1874`
-- `fetchPositions`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1909`
-- `fetchLeverageTiers`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L1955`
+- `fetchBalance` - Get account balances
+- `fetchPositions` - Get open positions
+- `setLeverage` - Set position leverage
 
-#### Utility Methods
-- `sign`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L2010`
-- `handleErrors`: `https://github.com/ccxt/ccxt/blob/master/js/phemex.js#L2093`
-
-## CCXT-Phemex Integration Examples
+## CCXT-Bitget Integration Examples
 
 ### JavaScript
 ```javascript
 const ccxt = require('ccxt');
 
-// Initialize Phemex exchange object
-const phemex = new ccxt.phemex({
+// Initialize Bitget exchange object
+const bitget = new ccxt.bitget({
     'apiKey': 'YOUR_API_KEY',
     'secret': 'YOUR_SECRET_KEY',
+    'password': 'YOUR_PASSPHRASE', // Bitget requires passphrase
+    'sandbox': true, // Use testnet
 });
 
-// Set testnet (optional)
-phemex.urls['api'] = phemex.urls['test'];
-
-// USDTM Futures Endpoints Usage
+// USDT-M Futures Endpoints Usage
 (async () => {
     // Public endpoints
-    const markets = await phemex.fetchMarkets();
-    const ticker = await phemex.fetchTicker('BTC/USDT:USDT');
-    const orderbook = await phemex.fetchOrderBook('BTC/USDT:USDT');
+    const markets = await bitget.fetchMarkets();
+    const ticker = await bitget.fetchTicker('BTC/USDT:USDT');
+    const orderbook = await bitget.fetchOrderBook('BTC/USDT:USDT');
+    const ohlcv = await bitget.fetchOHLCV('BTC/USDT:USDT', '15m');
     
     // Private endpoints
-    await phemex.loadMarkets();
-    const balance = await phemex.fetchBalance();
-    const positions = await phemex.fetchPositions(['BTC/USDT:USDT']);
+    await bitget.loadMarkets();
+    const balance = await bitget.fetchBalance();
+    const positions = await bitget.fetchPositions(['BTC/USDT:USDT']);
     
     // Trading
-    const order = await phemex.createOrder('BTC/USDT:USDT', 'limit', 'buy', 0.01, 50000);
+    const order = await bitget.createOrder('BTC/USDT:USDT', 'market', 'buy', 0.01);
 })();
 ```
 
@@ -190,37 +133,60 @@ phemex.urls['api'] = phemex.urls['test'];
 ```python
 import ccxt
 
-# Initialize Phemex exchange object
-phemex = ccxt.phemex({
+# Initialize Bitget exchange object
+bitget = ccxt.bitget({
     'apiKey': 'YOUR_API_KEY',
     'secret': 'YOUR_SECRET_KEY',
+    'password': 'YOUR_PASSPHRASE',
+    'sandbox': True,  # Use testnet
 })
 
-# Set testnet (optional)
-phemex.urls['api'] = phemex.urls['test']
-
-# USDTM Futures Endpoints Usage
-# Public endpoints
-markets = phemex.fetch_markets()
-ticker = phemex.fetch_ticker('BTC/USDT:USDT')
-orderbook = phemex.fetch_order_book('BTC/USDT:USDT')
-
-# Private endpoints
-phemex.load_markets()
-balance = phemex.fetch_balance()
-positions = phemex.fetch_positions(['BTC/USDT:USDT'])
-
-# Trading
-order = phemex.create_order('BTC/USDT:USDT', 'limit', 'buy', 0.01, 50000)
+# USDT-M Futures Trading
+async def trade_bitget():
+    # Public endpoints
+    markets = await bitget.fetch_markets()
+    ticker = await bitget.fetch_ticker('BTC/USDT:USDT')
+    orderbook = await bitget.fetch_order_book('BTC/USDT:USDT')
+    
+    # Private endpoints
+    await bitget.load_markets()
+    balance = await bitget.fetch_balance()
+    positions = await bitget.fetch_positions(['BTC/USDT:USDT'])
+    
+    # Trading
+    order = await bitget.create_order('BTC/USDT:USDT', 'market', 'buy', 0.01)
 ```
 
-## TradingView to CCXT-Phemex Bridge
+## TradingView to CCXT-Bitget Bridge
 
-### Webhook Receiver Endpoint
-- `https://your-server.com/api/webhook/phemex`
+### Webhook Endpoint
+- `https://your-server.com/api/webhook/bitget`
 
-### Order Processing Flow
-1. TradingView alert → Webhook
-2. Webhook → Order Processing Server
-3. Server → CCXT API calls
-4. CCXT → Phemex API
+### Signal Flow
+1. TradingView Alert
+2. Webhook POST
+3. Signal Processing
+4. CCXT → Bitget API
+
+## Bitget USDT-M Symbol Format
+
+### Standard Format
+- Spot: `BTC/USDT`
+- USDT-M Futures: `BTC/USDT:USDT`
+- Coin-M Futures: `BTC/USD:BTC`
+
+### Symbol Examples
+- `BTCUSDT_UMCBL` (Bitget native)
+- `BTC/USDT:USDT` (CCXT format)
+
+## Rate Limits
+- REST API: 20 requests per second
+- WebSocket: 240 connections per IP
+- Order limits: 100 orders per second
+
+## Error Codes
+- `30001`: Order does not exist
+- `30002`: Insufficient balance
+- `30003`: Order size too small
+- `40004`: Invalid symbol
+- `43025`: Order would trigger immediately
