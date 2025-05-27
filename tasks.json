@@ -1,0 +1,161 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Enhance Data Fetcher Module",
+      "description": "Improve historical data retrieval from exchanges, implement caching mechanisms, and optimize rate limiting for API calls.",
+      "details": "This task involves optimizing the data_fetcher.py module to efficiently retrieve and cache historical price data from cryptocurrency exchanges. It includes implementing a robust caching system to reduce redundant API calls, adding advanced rate limiting to prevent hitting exchange API limits, and improving error handling for network issues.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "2",
+      "title": "Optimize Volatility Scanner",
+      "description": "Refine volatility calculation algorithms, improve asset ranking by appeal score, and ensure efficient processing across multiple timeframes.",
+      "details": "The volatility_scanner.py module needs optimization for calculating various volatility metrics (ATR, historical volatility, realized volatility) more efficiently. This task includes improving the asset ranking algorithm by appeal score, implementing parallel processing for multiple timeframes, and enhancing the caching mechanism for volatility data.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "3",
+      "title": "Enhance Backtesting Engine Core",
+      "description": "Implement essential technical indicators, support multiple timeframes, and develop basic strategy evaluation functionality.",
+      "details": "This task focuses on enhancing the backtest_engine.py module to support a comprehensive set of technical indicators (RSI, MACD, Bollinger Bands, etc.), enable multi-timeframe backtesting, and implement core strategy evaluation functionality. The goal is to create a robust foundation for strategy testing that can be extended with optimization features in later tasks.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "4",
+      "title": "Implement Risk Management System",
+      "description": "Develop position sizing rules, implement stop-loss and take-profit mechanisms, and set up maximum drawdown limits.",
+      "details": "This task involves enhancing the risk_config.py module to implement advanced risk management features including dynamic position sizing based on account balance, customizable stop-loss and take-profit mechanisms, maximum drawdown protection, and limits on open trade counts. The system should be configurable and integrate seamlessly with the backtesting engine.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "5",
+      "title": "Create Basic Dashboard Layout",
+      "description": "Design and implement the basic dashboard UI with dark/light theme support and responsive design.",
+      "details": "This task involves creating the foundation for the web dashboard using Jinja2 templates. It includes designing a clean, responsive layout with dark/light theme support, implementing the basic navigation structure, and setting up the CSS framework. The dashboard should be mobile-friendly and follow modern UI design principles.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "6",
+      "title": "Implement Interactive Charts for Data Visualization",
+      "description": "Add interactive charts for price data, backtest results, and performance metrics visualization.",
+      "details": "This task focuses on implementing interactive charts in the dashboard for visualizing price data, backtest results, and performance metrics. It includes selecting and integrating a JavaScript charting library, creating components for different chart types (candlestick, equity curve, etc.), and ensuring charts are responsive and performant with large datasets.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "7",
+      "title": "Develop Strategy Configuration Interface",
+      "description": "Create an intuitive interface for configuring and saving trading strategies and backtest parameters.",
+      "details": "This task involves developing a user-friendly interface for configuring trading strategies and backtest parameters. It includes creating forms for setting technical indicator parameters, entry/exit conditions, timeframe selection, and risk management settings. The interface should validate inputs, support saving/loading configurations, and provide sensible defaults.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "8",
+      "title": "Implement Parameter Optimization with Optuna",
+      "description": "Integrate Optuna for hyperparameter optimization of trading strategies and develop visualization for optimization results.",
+      "details": "This task involves integrating Optuna into the backtesting engine for hyperparameter optimization of trading strategies. It includes defining optimization objectives (e.g., Sharpe ratio, total return), setting up parameter spaces for exploration, implementing visualization for optimization results, and developing a scheduler for running optimization tasks asynchronously.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "9",
+      "title": "Implement TradingView Webhook Integration",
+      "description": "Develop webhook endpoint for TradingView alerts, implement alert parsing, and trigger trade execution based on received signals.",
+      "details": "This task focuses on developing a webhook endpoint for receiving TradingView alerts. It includes implementing secure webhook authentication, parsing alert JSON data, validating incoming signals, and triggering appropriate trade actions based on the received information. The implementation should handle various alert formats and provide clear feedback for debugging.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "10",
+      "title": "Implement Real-time Trading Capabilities",
+      "description": "Develop and test real-time trading functionality with exchange integration, order management, and position tracking.",
+      "details": "This task involves implementing real-time trading functionality with full exchange integration. It includes developing modules for order submission, order tracking, position management, and balance monitoring. The implementation should handle partial fills, order cancellations, and various exchange-specific behaviors, while providing real-time updates to the dashboard.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": 11,
+      "title": "SuperZ Enhanced Strategy Implementation",
+      "description": "Implement the SuperZ enhanced strategy for live trading and testing on the testnet.",
+      "details": "",
+      "testStrategy": "",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "id": 12,
+      "title": "Complete Dashboards",
+      "description": "Complete dashboards for the project, ensuring all relevant data visualizations and metrics are included.",
+      "details": "",
+      "testStrategy": "",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "id": 13,
+      "title": "Unify trading modules",
+      "description": "Consolidate all trading scripts into a single modular package under `strategies/`",
+      "details": "Merge `supertrend_live.py`, `super_z_pullback_analyzer.py`, `super_z_optimized.py`, and `launch_supertrend.py` into a cohesive `strategies/` package with clear submodules for indicators, execution, and dashboard.",
+      "testStrategy": "Run the unified strategy end-to-end on Bitget testnet to ensure functionality and correct module imports.",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "medium",
+      "subtasks": []
+    },
+    {
+      "id": 14,
+      "title": "Optimize analysis performance by 500x",
+      "description": "Refactor data fetching and indicator calculations to leverage `asyncio`, multiprocessing, and vectorized operations for a 500× speed improvement.",
+      "details": "Implement asynchronous batch OHLCV fetching, vectorized SuperTrend and VHMA calculations, connection pooling, and caching to drastically reduce execution time.",
+      "testStrategy": "Benchmark optimized strategy against original implementation and verify at least 500× performance gain.",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "id": 15,
+      "title": "Enable live trading on Bitget testnet",
+      "description": "Configure and verify live trading functionality using Bitget testnet with paper trading mode.",
+      "details": "Centralize exchange configuration in `config.py`, add paper live toggle, implement robust error handling, retry logic, and rate limiting for order placement.",
+      "testStrategy": "Execute a test paper trade on Bitget testnet and confirm proper order simulation and dashboard updates.",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "high",
+      "subtasks": []
+    },
+    {
+      "id": 16,
+      "title": "Integrate monitoring and auto-reload",
+      "description": "Add file watcher to reload strategy code on changes and integrate centralized monitoring and logging dashboards.",
+      "details": "Use `watchdog` or uvicorn reload, configure WebSocket dashboard server to auto-refresh, and centralize logs with timestamped files.",
+      "testStrategy": "Modify a core strategy file during runtime and verify the server reloads without losing active connections and logs errors.",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "low",
+      "subtasks": []
+    },
+    {
+      "id": 17,
+      "title": "Cleanup stale files and update documentation",
+      "description": "Remove unused files older than four days, tidy up codebase, and update `README.md` and documentation to reflect new architecture.",
+      "details": "Identify and delete redundant scripts, update project structure in README, add usage examples and development guidelines.",
+      "testStrategy": "Run file audit to ensure no leftover scripts from before and review updated documentation for accuracy.",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "low",
+      "subtasks": []
+    }
+  ]
+}

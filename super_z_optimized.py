@@ -60,13 +60,14 @@ class OptimizedConnectionPool:
         """Initialize connection pool"""
         for _ in range(self.pool_size):
             exchange = ccxt.bitget({
-                'apiKey': '',
-                'secret': '',
+                'apiKey': 'YOUR_TESTNET_API_KEY',
+                'secret': 'YOUR_TESTNET_API_SECRET',
                 'password': '',
-                'sandbox': False,
+                'sandbox': True,
                 'enableRateLimit': True,
                 'rateLimit': 100,  # Optimized rate limit
             })
+            exchange.set_sandbox_mode(True)
             self.connections.append(exchange)
     
     def get_connection(self):
@@ -77,10 +78,10 @@ class OptimizedConnectionPool:
             else:
                 # Create new connection if pool is empty
                 return ccxt.bitget({
-                    'apiKey': '',
-                    'secret': '',
+                    'apiKey': 'YOUR_TESTNET_API_KEY',
+                    'secret': 'YOUR_TESTNET_API_SECRET',
                     'password': '',
-                    'sandbox': False,
+                    'sandbox': True,
                     'enableRateLimit': True,
                     'rateLimit': 100,
                 })

@@ -19,34 +19,78 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # Virtual Environment
+.venv/
 venv/
 ENV/
 
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
+# API Keys and Secrets
+.env
+secrets.json
+api_keys.txt
 
 # Logs
 *.log
 logs/
 
+# Analysis Results (temporary data files older than 7 days - these are generated)
+super_z_analysis_data_20250527_*.json
+super_z_pullback_analysis_20250527_*.txt
+supreme_z_analysis_data_*.json
+supreme_z_pullback_analysis_*.txt
+
+# Scanner Results (can be regenerated)
+scanner_results*.csv
+scanner_results*.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
-# Added by Claude Task Master
-logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-dev-debug.log
+# Jupyter
+.ipynb_checkpoints
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Nested git repositories
+BACKTESTER/.git/
+
+# Windows
+desktop.ini
+
 # Dependency directories
 node_modules/
 # Editor directories and files
@@ -58,6 +102,5 @@ node_modules/
 *.sln
 *.sw?
 # OS specific
-# Task files
-tasks.json
-tasks/ 
+# Keep important project files
+# tasks.json and tasks/ directory should be included 

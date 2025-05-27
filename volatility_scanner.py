@@ -142,14 +142,14 @@ class VolatilityScanner:
         
         # Ultra-fast rate limiting - minimal delays
         self.last_api_call = 0
-        self.min_api_interval = 0.05  # 50ms between API calls (20x faster)
+        self.min_api_interval = 0.2  # 200ms between API calls (safer)
+        self.max_concurrent_requests = 8  # Lower concurrency to avoid rate limits
         
         # Enhanced caching with persistence
         self.data_cache = {}
         self.cache_duration = 180  # 3 minutes cache
         
         # Batch processing settings
-        self.max_concurrent_requests = 20  # Process 20 symbols simultaneously
         self.batch_size = 10
         
         # Connection pool for aiohttp
@@ -217,128 +217,89 @@ class VolatilityScanner:
     async def fetch_market_data_fast(self, symbol: str, timeframe: str = '4h', lookback_days: int = 7) -> pd.DataFrame:
         """Ultra-fast market data fetching with minimal processing"""
         try:
-            # Check cache first with longer cache time
             cache_key = f"{symbol}_{timeframe}_{lookback_days}"
             if cache_key in self.data_cache:
                 cache_timestamp, df = self.data_cache[cache_key]
-                # Use cache for up to 3 minutes
                 if (datetime.now() - cache_timestamp).total_seconds() < self.cache_duration:
                     return df
-            
-            # Minimal rate limiting
             await self.rate_limit()
-            
-            # Calculate lookback in milliseconds
             since = int((datetime.now() - timedelta(days=lookback_days)).timestamp() * 1000)
-            
-            # Fetch OHLCV data with minimal retries
-            try:
-                ohlcv = await asyncio.to_thread(
-                    self.exchange.fetch_ohlcv,
-                    symbol,
-                    timeframe,
-                    since=since,
-                    limit=500  # Reduced limit for faster response
-                )
-            except Exception as e:
+            max_retries = 5
+            for attempt in range(max_retries):
+                try:
+                    ohlcv = await asyncio.to_thread(
+                        self.exchange.fetch_ohlcv,
+                        symbol,
+                        timeframe,
+                        since=since,
+                        limit=500
+                    )
+                    break
+                except ccxt.RateLimitExceeded:
+                    logger.warning(f"[429] Rate limit exceeded for {symbol} {timeframe}, retrying (attempt {attempt+1})...")
+                    await asyncio.sleep(2 ** attempt)
+                except Exception as e:
+                    if '429' in str(e):
+                        logger.warning(f"[429] Too Many Requests for {symbol} {timeframe}, retrying (attempt {attempt+1})...")
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    return None
+            else:
+                logger.error(f"Failed to fetch {symbol} {timeframe} after {max_retries} retries due to rate limits.")
                 return None
-            
             if not ohlcv or len(ohlcv) < 20:
                 return None
-            
-            # Fast DataFrame creation with minimal processing
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             df = df.sort_index()
-            
-            # Only calculate essential data
             df['returns'] = df['close'].pct_change()
             df.attrs['timeframe'] = timeframe
-            
-            # Store in cache
             self.data_cache[cache_key] = (datetime.now(), df)
-            
             return df
-            
         except Exception as e:
+            logger.error(f"Error fetching fast market data for {symbol}: {str(e)}")
             return None
 
-    async def get_all_usdt_m_pairs(self) -> List[str]:
-        """Fetch all available USDT-M pairs from Bitget"""
+    async def get_all_usdt_m_pairs_with_leverage(self) -> List[Tuple[str, float]]:
+        """Fetch all available USDT-M pairs and their max leverage from Bitget"""
         try:
             await self.rate_limit()
             logger.info("Fetching markets from Bitget...")
             markets = await asyncio.to_thread(self.exchange.fetch_markets)
-            
-            # Debug: Check what markets are available
-            logger.info(f"Total markets retrieved: {len(markets)}")
-            
-            # More flexible filtering to handle different exchange formats
-            usdt_pairs = []
+            pairs_with_leverage = []
             for market in markets:
                 symbol = market['symbol']
-                
-                # Check for active status
                 if not market.get('active', False):
                     continue
-                    
-                # Check for swap/future type
                 if market.get('type') not in ['swap', 'future']:
                     continue
-                    
-                # Match different USDT pair formats (BTCUSDT, BTC/USDT, BTC/USDT:USDT, etc)
                 is_usdt_pair = (
                     (':USDT' in symbol) or 
                     (symbol.endswith('USDT')) or 
                     (symbol.endswith('/USDT')) or
                     (market.get('quote') == 'USDT' and market.get('settle') == 'USDT')
                 )
-                
                 if is_usdt_pair:
-                    usdt_pairs.append(symbol)
-                    logger.debug(f"Found USDT-M pair: {symbol}")
-            
-            if not usdt_pairs:
-                # Fallback to hard-coded common pairs if no pairs found
-                logger.warning("No USDT-M pairs found via API filtering, using fallback list")
-                usdt_pairs = [
-                    "BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT",
-                    "BNB/USDT:USDT", "ADA/USDT:USDT", "DOGE/USDT:USDT", "MATIC/USDT:USDT",
-                    "DOT/USDT:USDT", "SHIB/USDT:USDT", "LTC/USDT:USDT", "AVAX/USDT:USDT",
-                    "LINK/USDT:USDT", "UNI/USDT:USDT", "ATOM/USDT:USDT"
-                ]
-            
-            logger.info(f"Found {len(usdt_pairs)} active USDT-M pairs on Bitget")
-            return usdt_pairs
-            
+                    max_leverage = market.get('limits', {}).get('leverage', {}).get('max', 1)
+                    pairs_with_leverage.append((symbol, max_leverage))
+            logger.info(f"Found {len(pairs_with_leverage)} active USDT-M pairs with leverage on Bitget")
+            return pairs_with_leverage
         except Exception as e:
-            logger.error(f"Error fetching USDT-M pairs: {str(e)}")
-            # Return a minimal list of common pairs as fallback
-            fallback_pairs = [
-                "BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"
-            ]
-            logger.info(f"Using {len(fallback_pairs)} fallback pairs due to error")
-            return fallback_pairs
+            logger.error(f"Error fetching USDT-M pairs with leverage: {str(e)}")
+            return []
 
-    async def fetch_market_data(self, symbol: str, timeframe: str, 
-                              lookback_days: int = 30) -> pd.DataFrame:
+    async def fetch_market_data(self, symbol: str, timeframe: str, lookback_days: int = 30) -> pd.DataFrame:
         """Fetch market data for a specific symbol and timeframe"""
         try:
-            # Check cache first
             cache_key = f"{symbol}_{timeframe}_{lookback_days}"
             if cache_key in self.data_cache:
                 cache_timestamp, df = self.data_cache[cache_key]
-                # If cache is recent (less than 5 minutes old), use it
                 if (datetime.now() - cache_timestamp).total_seconds() < 300:
                     return df
-            
             await self.rate_limit()
-            # Calculate lookback in milliseconds
             since = int((datetime.now() - timedelta(days=lookback_days)).timestamp() * 1000)
-            
-            # Fetch OHLCV data with retry logic
-            max_retries = 3
+            max_retries = 5
             for attempt in range(max_retries):
                 try:
                     ohlcv = await asyncio.to_thread(
@@ -350,36 +311,29 @@ class VolatilityScanner:
                     )
                     break
                 except ccxt.RateLimitExceeded:
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                    else:
-                        raise
+                    logger.warning(f"[429] Rate limit exceeded for {symbol} {timeframe}, retrying (attempt {attempt+1})...")
+                    await asyncio.sleep(2 ** attempt)
                 except Exception as e:
+                    if '429' in str(e):
+                        logger.warning(f"[429] Too Many Requests for {symbol} {timeframe}, retrying (attempt {attempt+1})...")
+                        await asyncio.sleep(2 ** attempt)
+                        continue
                     logger.error(f"Error fetching data for {symbol} on {timeframe}: {str(e)}")
                     return None
-            
-            # Convert to DataFrame
+            else:
+                logger.error(f"Failed to fetch {symbol} {timeframe} after {max_retries} retries due to rate limits.")
+                return None
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
-            
-            # Make sure the dataframe is sorted by time
             df = df.sort_index()
-            
-            # Calculate additional data
             df['returns'] = df['close'].pct_change()
             df['log_returns'] = np.log(df['close'] / df['close'].shift(1))
-            
-            # Ensure we have enough data
             if len(df) < 30:
                 logger.warning(f"Not enough data for {symbol} on {timeframe}, only {len(df)} candles")
                 return None
-            
-            # Store in cache
             self.data_cache[cache_key] = (datetime.now(), df)
-                
             return df
-            
         except Exception as e:
             logger.error(f"Error fetching data for {symbol} on {timeframe}: {str(e)}")
             return None
@@ -481,6 +435,27 @@ class VolatilityScanner:
             else:
                 volume_trend = 0
             
+            # OBV calculation
+            if len(closes) > 1:
+                obv = 0
+                obv_arr = np.zeros_like(closes)
+                for i in range(1, len(closes)):
+                    if closes[i] > closes[i-1]:
+                        obv += volumes[i]
+                    elif closes[i] < closes[i-1]:
+                        obv -= volumes[i]
+                    obv_arr[i] = obv
+                obv_val = obv_arr[-1]
+            else:
+                obv_val = 0
+
+            # Momentum (10-period ROC)
+            momentum_period = 10
+            if len(closes) > momentum_period:
+                momentum = (closes[-1] - closes[-momentum_period-1]) / closes[-momentum_period-1]
+            else:
+                momentum = 0
+            
             # Simplified metrics for speed
             metrics = {
                 'symbol': symbol,
@@ -500,6 +475,8 @@ class VolatilityScanner:
                 
                 # Technical indicators
                 'rsi': rsi,
+                'obv': obv_val,
+                'momentum': momentum,
                 
                 # Volume metrics
                 'volume': volume,
@@ -638,56 +615,55 @@ class VolatilityScanner:
 
     async def scan_all_markets_ultra_fast(self, timeframe: str = '4h', top_n: int = 20, min_volume: float = 100000) -> List[Dict[str, Any]]:
         """Ultra-fast market scanning with parallel processing and optimized calculations"""
-        # Get all USDT-M pairs
-        pairs = await self.get_all_usdt_m_pairs()
-        
+        # Get all USDT-M pairs with leverage
+        pairs_with_leverage = await self.get_all_usdt_m_pairs_with_leverage()
+        # Filter for leverage >= 25x
+        pairs = [s for s, lev in pairs_with_leverage if lev >= 25]
+        leverage_map = {s: lev for s, lev in pairs_with_leverage}
         if not pairs:
-            logger.error("No pairs found to scan! Returning empty result.")
+            logger.error("No pairs found to scan after leverage filter! Returning empty result.")
             return []
-        
         logger.info(f"Starting ultra-fast volatility scan for {len(pairs)} pairs on {timeframe} timeframe")
-        
         # Batch fetch all market data in parallel
         start_time = time.time()
         all_data = await self.fetch_all_market_data_batch(pairs, timeframe, lookback_days=7)
         fetch_time = time.time() - start_time
         logger.info(f"Fetched data for {len(all_data)} pairs in {fetch_time:.2f} seconds")
-        
-        # Process all metrics calculations in parallel using thread pool
         results = []
-        
         def calculate_metrics_wrapper(args):
             symbol, df = args
             if df is not None:
-                return self.calculate_volatility_metrics_fast(df, symbol)
+                metrics = self.calculate_volatility_metrics_fast(df, symbol)
+                if metrics:
+                    metrics['leverage'] = leverage_map.get(symbol, 1)
+                return metrics
             return None
-        
-        # Use ThreadPoolExecutor for CPU-bound metric calculations
         with ThreadPoolExecutor(max_workers=8) as executor:
             start_calc_time = time.time()
             metric_results = list(executor.map(calculate_metrics_wrapper, all_data.items()))
             calc_time = time.time() - start_calc_time
             logger.info(f"Calculated metrics for {len(metric_results)} pairs in {calc_time:.2f} seconds")
-        
-        # Filter and score results
         for metrics in metric_results:
-            if metrics and metrics.get('avg_volume', 0) >= min_volume:
-                # Add appeal score
-                metrics['appeal_score'] = self.calculate_appeal_score_fast(metrics)
-                # Add timeframe for reference
-                metrics['timeframe'] = timeframe
-                # Add timestamp
-                metrics['timestamp'] = datetime.now().isoformat()
+            if metrics and metrics.get('avg_volume', 0) >= min_volume and metrics.get('leverage', 1) >= 25:
+                # Add full enhanced score and tier
+                ranker = EnhancedMarketRanker()
+                perf = {
+                    'sharpe_ratio': metrics.get('sharpe_ratio', 0),
+                    'profit_factor': metrics.get('profit_factor', 1),
+                    'win_rate': metrics.get('win_rate', 0.5),
+                    'max_drawdown': metrics.get('max_drawdown', 0.2),
+                    'consistency': metrics.get('consistency', 0.5),
+                }
+                mtf_signals = metrics.get('mtf_signals', None)
+                scored = ranker.score_market(metrics, mtf_signals, perf)
+                metrics['score'] = scored['score']
+                metrics['tier'] = scored['tier']
+                metrics['mtf_trend'] = scored['mtf_trend']
                 results.append(metrics)
-        
-        # Sort by appeal score, descending
-        results.sort(key=lambda x: x.get('appeal_score', 0), reverse=True)
-        
-        # Return top N results
+        results.sort(key=lambda x: x.get('score', 0), reverse=True)
         top_results = results[:top_n]
         total_time = time.time() - start_time
         logger.info(f"Completed ultra-fast scan in {total_time:.2f}s, found {len(results)} valid pairs, returning top {len(top_results)}")
-        
         return top_results
 
     def calculate_appeal_score_fast(self, metrics: Dict[str, float]) -> float:
@@ -780,149 +756,212 @@ class VolatilityScanner:
 
 class EnhancedMarketRanker:
     """
-    Enhanced market ranking system for crypto trading bots.
-    Calculates a composite score (0-100+) for each market using multiple metrics and assigns a tier.
-    Adds visual/emoji cues for dashboard/log display.
+    Enhanced market ranking system with ultra-modern visual experience
     """
-    TIERS = [
-        (90, "GODLIKE UNICORN BUSSY TIER 🌈"),
-        (80, "ULTRA PREMIUM BUSSY TIER 💎"),
-        (70, "PREMIUM TIER ✨"),
-        (60, "HIGH POTENTIAL TIER 🔥"),
-        (50, "STRONG PERFORMER TIER ⚡"),
-        (40, "SOLID MARKET TIER 🥇"),
-        (30, "AVERAGE MARKET TIER 🥈"),
-        (20, "BASIC MARKET TIER 🥉"),
-        (10, "LOW QUALITY TIER 🪫"),
-        (0,  "PURE SHIT TIER 💩")
-    ]
-    METRIC_EMOJIS = {
-        'volume': '💰',
-        'volatility': '🌋',
-        'leverage': '🔥',
-        'tick_size': '🎯',
-        'liquidity': '🌊',
-        'obv': '📊',
-        'momentum': '🚀',
-        'rsi': '📈',
-        'supertrend': '🔮',
-        'sharpe': '📏',
-        'profit_factor': '💹',
-        'win_loss': '🏆',
-        'drawdown': '📉',
-        'consistency': '🔁',
-    }
-    METRIC_COLORS = {
-        'volume': '\033[93m',      # yellow
-        'volatility': '\033[95m',  # magenta
-        'leverage': '\033[91m',    # red
-        'tick_size': '\033[94m',   # blue
-        'liquidity': '\033[96m',   # cyan
-        'obv': '\033[92m',         # green
-        'momentum': '\033[91m',    # red
-        'rsi': '\033[94m',         # blue
-        'supertrend': '\033[95m',  # magenta
-        'sharpe': '\033[92m',      # green
-        'profit_factor': '\033[93m', # yellow
-        'win_loss': '\033[92m',    # green
-        'drawdown': '\033[91m',    # red
-        'consistency': '\033[96m', # cyan
-    }
+    # ANSI color codes
     COLOR_RESET = '\033[0m'
+    COLOR_BOLD = '\033[1m'
+    COLOR_UNDERLINE = '\033[4m'
+    COLOR_BLINK = '\033[5m'
+
+    # Enhanced visual elements
+    TIERS = [
+        (90, "GODLIKE UNICORN BUSSY TIER 🌈✨💫"),
+        (80, "ULTRA PREMIUM BUSSY TIER 💎🔥⚡"),
+        (70, "PREMIUM TIER ✨🌟💫"),
+        (60, "HIGH POTENTIAL TIER 🔥🚀💪"),
+        (50, "STRONG PERFORMER TIER ⚡💯🎯"),
+        (40, "SOLID MARKET TIER 🥇💫✨"),
+        (30, "AVERAGE MARKET TIER 🥈📊📈"),
+        (20, "BASIC MARKET TIER 🥉📉📊"),
+        (10, "LOW QUALITY TIER 🪫⚠️📉"),
+        (0,  "PURE SHIT TIER 💩🚫❌")
+    ]
+
+    # Enhanced metric emojis with dynamic states
+    METRIC_EMOJIS = {
+        'volume': ['💰', '💎', '💵', '💸', '🤑'],
+        'volatility': ['🌋', '⚡', '🔥', '💥', '🌪️'],
+        'leverage': ['🔥', '💪', '⚡', '🚀', '💫'],
+        'tick_size': ['🎯', '🎨', '🎪', '🎭', '🎪'],
+        'liquidity': ['🌊', '💧', '🌊', '💦', '🌊'],
+        'obv': ['📊', '📈', '📉', '📊', '📈'],
+        'momentum': ['🚀', '💫', '⚡', '🔥', '💪'],
+        'rsi': ['📈', '📊', '📉', '📈', '📊'],
+        'supertrend': ['🔮', '✨', '🌟', '💫', '⭐'],
+        'sharpe': ['📏', '📐', '📊', '📈', '📉'],
+        'profit_factor': ['💹', '📈', '💯', '🎯', '✨'],
+        'win_loss': ['🏆', '🎯', '💪', '🔥', '⚡'],
+        'drawdown': ['📉', '⚠️', '🚫', '❌', '💩'],
+        'consistency': ['🔄', '⚡', '💫', '✨']
+    }
+
+    # Enhanced ANSI colors with gradients
+    METRIC_COLORS = {
+        'volume': '\033[38;2;255;215;0m',      # Gold gradient
+        'volatility': '\033[38;2;255;0;255m',  # Magenta gradient
+        'leverage': '\033[38;2;255;0;0m',      # Red gradient
+        'tick_size': '\033[38;2;0;191;255m',   # Deep sky blue
+        'liquidity': '\033[38;2;0;255;255m',   # Cyan gradient
+        'obv': '\033[38;2;0;255;0m',           # Green gradient
+        'momentum': '\033[38;2;255;69;0m',     # Orange-red gradient
+        'rsi': '\033[38;2;30;144;255m',        # Dodger blue
+        'supertrend': '\033[38;2;147;112;219m', # Medium purple
+        'sharpe': '\033[38;2;50;205;50m',      # Lime green
+        'profit_factor': '\033[38;2;255;215;0m', # Gold
+        'win_loss': '\033[38;2;0;255;127m',    # Spring green
+        'drawdown': '\033[38;2;255;0;0m',      # Red
+        'consistency': '\033[38;2;0;191;255m'  # Deep sky blue
+    }
+
+    # Animation frames for loading states
+    LOADING_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
     def __init__(self, mtf_timeframes=None):
         self.mtf_timeframes = mtf_timeframes or ["15m", "1h", "4h", "1d"]
+        self.st_period = 50
+        self.st_multiplier = 1.0
+        self.animation_index = 0
+        self.last_update = time.time()
+
+    def get_animated_emoji(self, metric: str, value: float) -> str:
+        emojis = self.METRIC_EMOJIS.get(metric, ['❓'])
+        # Normalize value to 0-1 for emoji index
+        norm = min(max(float(value) / 20, 0), 1)
+        index = min(int(norm * (len(emojis)-1)), len(emojis) - 1)
+        return emojis[index]
+
+    def get_gradient_color(self, metric: str, value: float) -> str:
+        base_color = self.METRIC_COLORS.get(metric, '\033[38;2;255;255;255m')
+        # Optionally, could modulate color intensity by value
+        return base_color
+
+    def create_progress_bar(self, value: float, width: int = 20) -> str:
+        value = min(max(value, 0), 1)
+        filled = int(width * value)
+        bar = '█' * filled + '░' * (width - filled)
+        return f"[{bar}] {value*100:.1f}%"
+
+    def create_metric_line(self, metric: str, value: float, score: float) -> str:
+        emoji = self.get_animated_emoji(metric, score)
+        color = self.get_gradient_color(metric, score)
+        progress = self.create_progress_bar(score/20)  # Normalize to 0-1 range
+        return f"{color}{emoji} {metric.title():<12} {progress}{self.COLOR_RESET}"
+
+    def create_tier_banner(self, tier: str, score: float) -> str:
+        banner = f"\n{self.COLOR_BOLD}{'='*60}{self.COLOR_RESET}\n"
+        banner += f"{self.COLOR_BOLD}{' ' * 15}{tier}{self.COLOR_RESET}\n"
+        banner += f"{self.COLOR_BOLD}{' ' * 20}Score: {score:.2f}{self.COLOR_RESET}\n"
+        banner += f"{self.COLOR_BOLD}{'='*60}{self.COLOR_RESET}\n"
+        return banner
+
+    def create_visual_breakdown(self, metrics: Dict, breakdown: Dict) -> str:
+        visual_lines = []
+        for metric, score in breakdown.items():
+            value = metrics.get(metric, score)
+            try:
+                visual_lines.append(self.create_metric_line(metric, value, score))
+            except Exception:
+                visual_lines.append(f"{metric}: {score:.1f}")
+        return "\n".join(visual_lines)
 
     def score_market(self, metrics, mtf_signals=None, perf=None):
-        """
-        Score a market using all metrics, apply MTF bonus/penalty, assign tier, and return breakdown.
-        Adds visual/emoji cues for dashboard/log display.
-        """
-        score = 0
+        # Define max points for each metric
+        metric_points = {
+            'volume': 20,
+            'volatility': 15,
+            'leverage': 10,
+            'tick_size': 10,
+            'liquidity': 10,
+            'obv': 7,
+            'momentum': 10,
+            'rsi': 10,
+            'supertrend': 15,
+            'sharpe': 10,
+            'profit_factor': 10,
+            'win_loss': 10,
+            'drawdown': 10,
+            'consistency': 10,
+        }
         breakdown = {}
         visual_breakdown = {}
         # Volume (log scale, max 20)
         volume = metrics.get('volume', 0)
-        volume_score = min(20, 5 * np.log10(max(volume, 1)))
+        volume_score = min(metric_points['volume'], 5 * np.log10(max(volume, 1)))
         breakdown['volume'] = volume_score
-        visual_breakdown['volume'] = f"{self.METRIC_COLORS['volume']}{self.METRIC_EMOJIS['volume']} Volume: {volume_score:.1f}{self.COLOR_RESET}"
-        score += volume_score
+        visual_breakdown['volume'] = self.create_metric_line('volume', volume, volume_score)
         # Volatility (max 15)
-        vol_score = min(15, metrics.get('daily_volatility', 0) / 2)
+        vol_score = min(metric_points['volatility'], metrics.get('daily_volatility', 0) / 2)
         breakdown['volatility'] = vol_score
-        visual_breakdown['volatility'] = f"{self.METRIC_COLORS['volatility']}{self.METRIC_EMOJIS['volatility']} Volatility: {vol_score:.1f}{self.COLOR_RESET}"
-        score += vol_score
+        visual_breakdown['volatility'] = self.create_metric_line('volatility', metrics.get('daily_volatility', 0), vol_score)
         # Leverage (max 10, assume 50x+ is 10)
         leverage = metrics.get('leverage', 50)
-        lev_score = 10 if leverage >= 100 else 8 if leverage >= 50 else 5
+        lev_score = metric_points['leverage'] if leverage >= 100 else 8 if leverage >= 50 else 5
         breakdown['leverage'] = lev_score
-        visual_breakdown['leverage'] = f"{self.METRIC_COLORS['leverage']}{self.METRIC_EMOJIS['leverage']} Leverage: {lev_score}{self.COLOR_RESET}"
-        score += lev_score
+        visual_breakdown['leverage'] = self.create_metric_line('leverage', leverage, lev_score)
         # Tick Size (max 10, smaller is better)
         tick = metrics.get('tick_size', 0.01)
-        tick_score = 10 if tick < 0.001 else 8 if tick < 0.01 else 5
+        tick_score = metric_points['tick_size'] if tick < 0.001 else 8 if tick < 0.01 else 5
         breakdown['tick_size'] = tick_score
-        visual_breakdown['tick_size'] = f"{self.METRIC_COLORS['tick_size']}{self.METRIC_EMOJIS['tick_size']} Tick Size: {tick_score}{self.COLOR_RESET}"
-        score += tick_score
+        visual_breakdown['tick_size'] = self.create_metric_line('tick_size', tick, tick_score)
         # Liquidity (max 10, based on volume)
-        liq_score = min(10, volume_score)
+        liq_score = min(metric_points['liquidity'], volume_score)
         breakdown['liquidity'] = liq_score
-        visual_breakdown['liquidity'] = f"{self.METRIC_COLORS['liquidity']}{self.METRIC_EMOJIS['liquidity']} Liquidity: {liq_score}{self.COLOR_RESET}"
-        score += liq_score
+        visual_breakdown['liquidity'] = self.create_metric_line('liquidity', volume, liq_score)
         # OBV (max 7, normalized)
         obv = metrics.get('obv', 0)
-        obv_score = min(7, abs(obv) / 1e7)
+        obv_score = min(metric_points['obv'], abs(obv) / 1e7)
         breakdown['obv'] = obv_score
-        visual_breakdown['obv'] = f"{self.METRIC_COLORS['obv']}{self.METRIC_EMOJIS['obv']} OBV: {obv_score:.1f}{self.COLOR_RESET}"
-        score += obv_score
+        visual_breakdown['obv'] = self.create_metric_line('obv', obv, obv_score)
         # Momentum (max 10, normalized ROC)
         momentum = metrics.get('momentum', 0)
-        mom_score = min(10, abs(momentum) * 10)
+        mom_score = min(metric_points['momentum'], abs(momentum) * 10)
         breakdown['momentum'] = mom_score
-        visual_breakdown['momentum'] = f"{self.METRIC_COLORS['momentum']}{self.METRIC_EMOJIS['momentum']} Momentum: {mom_score:.1f}{self.COLOR_RESET}"
-        score += mom_score
+        visual_breakdown['momentum'] = self.create_metric_line('momentum', momentum, mom_score)
         # RSI (max 10, extreme values get higher score)
         rsi = metrics.get('rsi', 50)
-        rsi_score = 10 if rsi < 40 or rsi > 60 else 5
+        rsi_score = metric_points['rsi'] if rsi < 40 or rsi > 60 else 5
         breakdown['rsi'] = rsi_score
-        visual_breakdown['rsi'] = f"{self.METRIC_COLORS['rsi']}{self.METRIC_EMOJIS['rsi']} RSI: {rsi_score}{self.COLOR_RESET}"
-        score += rsi_score
+        visual_breakdown['rsi'] = self.create_metric_line('rsi', rsi, rsi_score)
         # SuperTrend (max 15, strong trend = high score)
-        st = metrics.get('supertrend', 0)
-        st_score = 15 if st else 7
+        st_metrics = metrics.get('supertrend_metrics', {})
+        st_score = 0
+        trend_score = st_metrics.get('supertrend', 0)
+        st_score += 5 if trend_score != 0 else 0
+        trend_strength = st_metrics.get('trend_strength', 0)
+        st_score += min(5, trend_strength * 10)
+        trend_consistency = st_metrics.get('trend_consistency', 0)
+        st_score += min(5, trend_consistency * 10)
+        st_score = min(metric_points['supertrend'], st_score)
         breakdown['supertrend'] = st_score
-        visual_breakdown['supertrend'] = f"{self.METRIC_COLORS['supertrend']}{self.METRIC_EMOJIS['supertrend']} SuperTrend: {st_score}{self.COLOR_RESET}"
-        score += st_score
+        visual_breakdown['supertrend'] = self.create_metric_line('supertrend', st_score, st_score)
         # Sharpe Ratio (max 10)
         sharpe = perf.get('sharpe_ratio', 0) if perf else 0
-        sharpe_score = min(10, max(0, sharpe * 2))
+        sharpe_score = min(metric_points['sharpe'], max(0, sharpe * 2))
         breakdown['sharpe'] = sharpe_score
-        visual_breakdown['sharpe'] = f"{self.METRIC_COLORS['sharpe']}{self.METRIC_EMOJIS['sharpe']} Sharpe: {sharpe_score:.1f}{self.COLOR_RESET}"
-        score += sharpe_score
+        visual_breakdown['sharpe'] = self.create_metric_line('sharpe', sharpe, sharpe_score)
         # Profit Factor (max 10)
         pf = perf.get('profit_factor', 1) if perf else 1
-        pf_score = min(10, max(0, (pf-1)*5))
+        pf_score = min(metric_points['profit_factor'], max(0, (pf-1)*5))
         breakdown['profit_factor'] = pf_score
-        visual_breakdown['profit_factor'] = f"{self.METRIC_COLORS['profit_factor']}{self.METRIC_EMOJIS['profit_factor']} Profit Factor: {pf_score:.1f}{self.COLOR_RESET}"
-        score += pf_score
+        visual_breakdown['profit_factor'] = self.create_metric_line('profit_factor', pf, pf_score)
         # Win/Loss (max 10)
         win_rate = perf.get('win_rate', 0.5) if perf else 0.5
-        wl_score = min(10, win_rate * 10)
+        wl_score = min(metric_points['win_loss'], win_rate * 10)
         breakdown['win_loss'] = wl_score
-        visual_breakdown['win_loss'] = f"{self.METRIC_COLORS['win_loss']}{self.METRIC_EMOJIS['win_loss']} Win/Loss: {wl_score:.1f}{self.COLOR_RESET}"
-        score += wl_score
+        visual_breakdown['win_loss'] = self.create_metric_line('win_loss', win_rate, wl_score)
         # Drawdown (max 10, lower is better)
         dd = perf.get('max_drawdown', 0.2) if perf else 0.2
-        dd_score = 10 if dd < 0.1 else 7 if dd < 0.2 else 4
+        dd_score = metric_points['drawdown'] if dd < 0.1 else 7 if dd < 0.2 else 4
         breakdown['drawdown'] = dd_score
-        visual_breakdown['drawdown'] = f"{self.METRIC_COLORS['drawdown']}{self.METRIC_EMOJIS['drawdown']} Drawdown: {dd_score}{self.COLOR_RESET}"
-        score += dd_score
+        visual_breakdown['drawdown'] = self.create_metric_line('drawdown', dd, dd_score)
         # Consistency (max 10, higher = more stable)
         consistency = perf.get('consistency', 0.5) if perf else 0.5
-        cons_score = min(10, consistency * 10)
+        cons_score = min(metric_points['consistency'], consistency * 10)
         breakdown['consistency'] = cons_score
-        visual_breakdown['consistency'] = f"{self.METRIC_COLORS['consistency']}{self.METRIC_EMOJIS['consistency']} Consistency: {cons_score:.1f}{self.COLOR_RESET}"
-        score += cons_score
+        visual_breakdown['consistency'] = self.create_metric_line('consistency', consistency, cons_score)
+        # Sum all metric points for raw score (max 100)
+        raw_score = sum(breakdown.get(k, 0) for k in metric_points)
         # 2. MTF Trend Bonus/Penalty
         mtf_trend = 'neutral'
         mtf_bonus = 0
@@ -932,27 +971,48 @@ class EnhancedMarketRanker:
             bearish = sum(1 for s in mtf_signals if s == 'bearish')
             if bullish > len(mtf_signals)//2:
                 mtf_trend = 'bullish'
-                mtf_bonus = score * 0.5
+                mtf_bonus = raw_score * 0.5
                 mtf_icon = '📈'
             elif bearish > len(mtf_signals)//2:
                 mtf_trend = 'bearish'
-                mtf_bonus = -score * 0.5
+                mtf_bonus = -raw_score * 0.5
                 mtf_icon = '📉'
-        score += mtf_bonus
+        final_score = raw_score + mtf_bonus
+        final_score = max(0, min(100, final_score))
         # 3. Assign tier
-        tier = next(t for s, t in self.TIERS if score >= s)
+        tier = next(t for s, t in self.TIERS if final_score >= s)
         # 4. Visual summary string
-        summary = f"{tier} | Score: {score:.2f} {mtf_icon}\n" + \
-                  " | ".join(visual_breakdown.values())
+        summary = f"{self.create_tier_banner(tier, final_score)}\n{self.create_visual_breakdown(metrics, breakdown)}\n{mtf_icon}"
         # 5. Return full breakdown
         return {
-            'score': round(score, 2),
+            'score': round(final_score, 2),
             'tier': tier,
             'mtf_trend': mtf_trend,
             'metrics_breakdown': breakdown,
             'visual_breakdown': visual_breakdown,
-            'summary': summary
+            'summary': summary,
+            'animated_breakdown': self.create_animated_breakdown(breakdown)
         }
+
+    def create_animated_breakdown(self, breakdown: Dict[str, float]) -> str:
+        self.animation_index = (self.animation_index + 1) % len(self.LOADING_FRAMES)
+        loading = self.LOADING_FRAMES[self.animation_index]
+        animated = []
+        for metric, value in breakdown.items():
+            emoji = self.get_animated_emoji(metric, value)
+            color = self.get_gradient_color(metric, value)
+            animated.append(f"{loading} {color}{emoji} {metric}: {value:.1f}{self.COLOR_RESET}")
+        return "\n".join(animated)
+
+    def print_market_analysis(self, result: Dict):
+        print("\033[2J\033[H")  # Clear screen
+        print(result['summary'])
+        print("\nReal-time Analysis:")
+        print(result['animated_breakdown'])
+        if 'perf' in result:
+            print(f"\n{self.COLOR_BOLD}Performance Metrics:{self.COLOR_RESET}")
+            for metric, value in result['perf'].items():
+                print(f"  {metric}: {value:.2f}")
 
 # Function to run the scanner
 async def scan_for_volatile_coins(api_key: str = None, api_secret: str = None, 
@@ -969,7 +1029,7 @@ def run_volatility_scan(api_key: str = None, api_secret: str = None,
 
 if __name__ == "__main__":
     # Run independently for testing
-    results = run_volatility_scan(top_n=10)
+    results = run_volatility_scan(top_n=10, testnet=False)
     ranker = EnhancedMarketRanker()
     # Print results with full visual scoring
     for timeframe, coins in results.items():
@@ -984,5 +1044,5 @@ if __name__ == "__main__":
                 'consistency': coin.get('consistency', 0.5),
             }
             mtf_signals = coin.get('mtf_signals', None)
-            summary = ranker.score_market(coin, mtf_signals, perf)['summary']
-            print(f"{i}. {coin['symbol']}\n{summary}\n{'-'*100}")
+            result = ranker.score_market(coin, mtf_signals, perf)
+            ranker.print_market_analysis(result)

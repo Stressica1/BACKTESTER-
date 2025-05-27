@@ -1,0 +1,7 @@
+=== TRADE LOG (15m) ===
+
+=== SUMMARY ===
+Total Trades: 0
+Wins: 0 | Losses: 0
+Win Rate: 0.00%
+Total PnL: 0.00%

@@ -1,0 +1,11 @@
+# Task ID: task-3
+# Title: Enhance Backtesting Engine Core
+# Status: todo
+# Dependencies: None
+# Priority: high
+# Description: Implement essential technical indicators, support multiple timeframes, and develop basic strategy evaluation functionality.
+# Details:
+
+
+# Test Strategy:
+

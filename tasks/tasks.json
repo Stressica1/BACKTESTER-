@@ -1,0 +1,143 @@
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Enhance Data Fetcher Module",
+      "description": "Improve historical data retrieval from exchanges, implement caching mechanisms, and optimize rate limiting for API calls.",
+      "details": "This task involves optimizing the data_fetcher.py module to efficiently retrieve and cache historical price data from cryptocurrency exchanges. It includes implementing a robust caching system to reduce redundant API calls, adding advanced rate limiting to prevent hitting exchange API limits, and improving error handling for network issues.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "2",
+      "title": "Optimize Volatility Scanner",
+      "description": "Refine volatility calculation algorithms, improve asset ranking by appeal score, and ensure efficient processing across multiple timeframes.",
+      "details": "The volatility_scanner.py module needs optimization for calculating various volatility metrics (ATR, historical volatility, realized volatility) more efficiently. This task includes improving the asset ranking algorithm by appeal score, implementing parallel processing for multiple timeframes, and enhancing the caching mechanism for volatility data.",
+      "status": "pending",
+      "dependencies": []
+    },
+    {
+      "id": "task-3",
+      "title": "Enhance Backtesting Engine Core",
+      "description": "Implement essential technical indicators, support multiple timeframes, and develop basic strategy evaluation functionality.",
+      "estimate": "large",
+      "status": "todo",
+      "priority": "high",
+      "dependencies": [],
+      "tags": [
+        "backend",
+        "backtesting",
+        "indicators"
+      ]
+    },
+    {
+      "id": "task-4",
+      "title": "Implement Risk Management System",
+      "description": "Develop position sizing rules, implement stop-loss and take-profit mechanisms, and set up maximum drawdown limits.",
+      "estimate": "medium",
+      "status": "todo",
+      "priority": "medium",
+      "dependencies": [],
+      "tags": [
+        "backend",
+        "risk",
+        "management"
+      ]
+    },
+    {
+      "id": "task-5",
+      "title": "Create Basic Dashboard Layout",
+      "description": "Design and implement the basic dashboard UI with dark/light theme support and responsive design.",
+      "estimate": "medium",
+      "status": "todo",
+      "priority": "medium",
+      "dependencies": [],
+      "tags": [
+        "frontend",
+        "ui",
+        "design"
+      ]
+    },
+    {
+      "id": "task-6",
+      "title": "Develop Backtest Visualization",
+      "description": "Create visualizations for backtest results including equity curves, trade history, and performance metrics.",
+      "estimate": "medium",
+      "status": "todo",
+      "priority": "medium",
+      "dependencies": [],
+      "tags": [
+        "frontend",
+        "visualization",
+        "backtesting"
+      ]
+    },
+    {
+      "id": "task-7",
+      "title": "Implement TradingView Webhook Integration",
+      "description": "Set up webhook endpoints to receive and process TradingView alerts, including authentication and validation.",
+      "estimate": "small",
+      "status": "todo",
+      "priority": "low",
+      "dependencies": [],
+      "tags": [
+        "integration",
+        "webhook",
+        "tradingview"
+      ]
+    },
+    {
+      "id": "task-8",
+      "title": "Add Parameter Optimization using Optuna",
+      "description": "Integrate Optuna for hyperparameter optimization of trading strategies, with visualization of optimization results.",
+      "estimate": "large",
+      "status": "todo",
+      "priority": "low",
+      "dependencies": [],
+      "tags": [
+        "backend",
+        "optimization",
+        "parameter-tuning"
+      ]
+    },
+    {
+      "id": "task-9",
+      "title": "Improve Error Handling and Logging",
+      "description": "Implement comprehensive error handling, logging, and monitoring across all system components.",
+      "estimate": "medium",
+      "status": "todo",
+      "priority": "medium",
+      "dependencies": [],
+      "tags": [
+        "reliability",
+        "logging",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "task-10",
+      "title": "Create Volatility Scanner Dashboard",
+      "description": "Design and implement the volatility scanner dashboard with sorting, filtering, and detailed asset information.",
+      "estimate": "medium",
+      "status": "todo",
+      "priority": "medium",
+      "dependencies": [],
+      "tags": [
+        "frontend",
+        "visualization",
+        "volatility"
+      ]
+    },
+    {
+      "id": null,
+      "title": "Unify trading modules",
+      "description": "Consolidate all trading scripts into a single modular package under `strategies/`",
+      "details": "Merge `supertrend_live.py`, `super_z_pullback_analyzer.py`, `super_z_optimized.py`, and `launch_supertrend.py` into a cohesive `strategies/` package with clear submodules for indicators, execution, and dashboard.",
+      "testStrategy": "Run the unified strategy end-to-end on Bitget testnet to ensure functionality and correct module imports.",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "medium",
+      "subtasks": []
+    }
+  ]
+}

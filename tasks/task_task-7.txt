@@ -1,0 +1,11 @@
+# Task ID: task-7
+# Title: Implement TradingView Webhook Integration
+# Status: todo
+# Dependencies: None
+# Priority: low
+# Description: Set up webhook endpoints to receive and process TradingView alerts, including authentication and validation.
+# Details:
+
+
+# Test Strategy:
+

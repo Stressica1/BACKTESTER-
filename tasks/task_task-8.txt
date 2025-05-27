@@ -1,0 +1,11 @@
+# Task ID: task-8
+# Title: Add Parameter Optimization using Optuna
+# Status: todo
+# Dependencies: None
+# Priority: low
+# Description: Integrate Optuna for hyperparameter optimization of trading strategies, with visualization of optimization results.
+# Details:
+
+
+# Test Strategy:
+

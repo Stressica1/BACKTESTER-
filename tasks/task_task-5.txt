@@ -1,0 +1,11 @@
+# Task ID: task-5
+# Title: Create Basic Dashboard Layout
+# Status: todo
+# Dependencies: None
+# Priority: medium
+# Description: Design and implement the basic dashboard UI with dark/light theme support and responsive design.
+# Details:
+
+
+# Test Strategy:
+

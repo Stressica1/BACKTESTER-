@@ -1,0 +1,11 @@
+# Task ID: task-4
+# Title: Implement Risk Management System
+# Status: todo
+# Dependencies: None
+# Priority: medium
+# Description: Develop position sizing rules, implement stop-loss and take-profit mechanisms, and set up maximum drawdown limits.
+# Details:
+
+
+# Test Strategy:
+
