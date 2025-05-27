@@ -45,12 +45,6 @@ class BacktestEngine:
             if not (conditions['rsi']['min'] <= rsi <= conditions['rsi']['max']):
                 return False
                 
-        if 'macd' in conditions:
-            macd = data['macd'].iloc[index]
-            signal = data['macd_signal'].iloc[index]
-            if not (macd > signal if conditions['macd']['direction'] == 'long' else macd < signal):
-                return False
-                
         return True
 
     def check_exit_conditions(self, data: pd.DataFrame, index: int, trade: Dict[str, Any]) -> bool:

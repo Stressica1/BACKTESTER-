@@ -45,7 +45,9 @@ def start_strategy():
         process = subprocess.Popen([sys.executable, "supertrend_live.py"], 
                                   stdout=subprocess.PIPE,
                                   stderr=subprocess.PIPE,
-                                  text=True)
+                                  text=True,
+                                  encoding='utf-8',
+                                  errors='replace')
         
         # Log output
         while True:
@@ -98,7 +100,9 @@ def start_pullback_analyzer():
             [sys.executable, "super_z_pullback_analyzer.py"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            encoding='utf-8',
+            errors='replace'
         )
         threading.Thread(
             target=_log_process_output,
@@ -119,7 +123,9 @@ def start_optimized_analyzer():
             [sys.executable, "super_z_optimized.py"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            encoding='utf-8',
+            errors='replace'
         )
         threading.Thread(
             target=_log_process_output,

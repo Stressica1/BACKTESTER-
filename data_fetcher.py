@@ -68,12 +68,6 @@ class DataFetcher:
         rs = gain / loss
         df['rsi'] = 100 - (100 / (1 + rs))
         
-        # MACD
-        exp1 = df['close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['close'].ewm(span=26, adjust=False).mean()
-        df['macd'] = exp1 - exp2
-        df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
-        
         # Bollinger Bands
         df['bb_middle'] = df['close'].rolling(window=20).mean()
         df['bb_std'] = df['close'].rolling(window=20).std()

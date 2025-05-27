@@ -135,9 +135,6 @@ class VolatilityScanner:
         
         # Additional technical parameters
         self.rsi_period = 14
-        self.macd_fast = 12
-        self.macd_slow = 26
-        self.macd_signal = 9
         self.bollinger_period = 20
         self.bollinger_std = 2
         self.volume_sma_period = 20
@@ -550,7 +547,6 @@ class VolatilityScanner:
             
             # Trend metrics (15% of score)
             'trend_strength': 0.05,           # Strength of current trend
-            'macd_direction': 0.05,           # MACD direction (bullish/bearish)
             '1d_change': 0.025,               # Short-term price change
             '3d_change': 0.025,               # Medium-term price change
             
@@ -612,20 +608,14 @@ class VolatilityScanner:
                     'volume_trend': (-50, 100),        # -50% to +100% trend
                     'trend_strength': (0, 1),          # Already 0-1
                     'volume_volatility': (0, 100),     # 0-100% volume volatility
-                    'macd_direction': (-1, 1),         # -1 to +1, normalize to 0-1
                 }
                 
                 if metric in norm_ranges:
                     min_val, max_val = norm_ranges[metric]
                     value = metrics[metric]
                     
-                    # Special handling for mean reversion direction
-                    if metric == 'macd_direction':
-                        # Convert from [-1, 0, 1] to [0, 0.5, 1]
-                        norm_value = (value + 1) / 2
-                    else:
-                        # Standard normalization
-                        norm_value = (value - min_val) / (max_val - min_val)
+                    # Standard normalization
+                    norm_value = (value - min_val) / (max_val - min_val)
                     
                     # Clip to 0-1 range
                     norm_value = max(0, min(1, norm_value))
@@ -788,6 +778,182 @@ class VolatilityScanner:
             logger.error(f"Error predicting volatility: {str(e)}")
             return {}
 
+class EnhancedMarketRanker:
+    """
+    Enhanced market ranking system for crypto trading bots.
+    Calculates a composite score (0-100+) for each market using multiple metrics and assigns a tier.
+    Adds visual/emoji cues for dashboard/log display.
+    """
+    TIERS = [
+        (90, "GODLIKE UNICORN BUSSY TIER 🌈"),
+        (80, "ULTRA PREMIUM BUSSY TIER 💎"),
+        (70, "PREMIUM TIER ✨"),
+        (60, "HIGH POTENTIAL TIER 🔥"),
+        (50, "STRONG PERFORMER TIER ⚡"),
+        (40, "SOLID MARKET TIER 🥇"),
+        (30, "AVERAGE MARKET TIER 🥈"),
+        (20, "BASIC MARKET TIER 🥉"),
+        (10, "LOW QUALITY TIER 🪫"),
+        (0,  "PURE SHIT TIER 💩")
+    ]
+    METRIC_EMOJIS = {
+        'volume': '💰',
+        'volatility': '🌋',
+        'leverage': '🔥',
+        'tick_size': '🎯',
+        'liquidity': '🌊',
+        'obv': '📊',
+        'momentum': '🚀',
+        'rsi': '📈',
+        'supertrend': '🔮',
+        'sharpe': '📏',
+        'profit_factor': '💹',
+        'win_loss': '🏆',
+        'drawdown': '📉',
+        'consistency': '🔁',
+    }
+    METRIC_COLORS = {
+        'volume': '\033[93m',      # yellow
+        'volatility': '\033[95m',  # magenta
+        'leverage': '\033[91m',    # red
+        'tick_size': '\033[94m',   # blue
+        'liquidity': '\033[96m',   # cyan
+        'obv': '\033[92m',         # green
+        'momentum': '\033[91m',    # red
+        'rsi': '\033[94m',         # blue
+        'supertrend': '\033[95m',  # magenta
+        'sharpe': '\033[92m',      # green
+        'profit_factor': '\033[93m', # yellow
+        'win_loss': '\033[92m',    # green
+        'drawdown': '\033[91m',    # red
+        'consistency': '\033[96m', # cyan
+    }
+    COLOR_RESET = '\033[0m'
+
+    def __init__(self, mtf_timeframes=None):
+        self.mtf_timeframes = mtf_timeframes or ["15m", "1h", "4h", "1d"]
+
+    def score_market(self, metrics, mtf_signals=None, perf=None):
+        """
+        Score a market using all metrics, apply MTF bonus/penalty, assign tier, and return breakdown.
+        Adds visual/emoji cues for dashboard/log display.
+        """
+        score = 0
+        breakdown = {}
+        visual_breakdown = {}
+        # Volume (log scale, max 20)
+        volume = metrics.get('volume', 0)
+        volume_score = min(20, 5 * np.log10(max(volume, 1)))
+        breakdown['volume'] = volume_score
+        visual_breakdown['volume'] = f"{self.METRIC_COLORS['volume']}{self.METRIC_EMOJIS['volume']} Volume: {volume_score:.1f}{self.COLOR_RESET}"
+        score += volume_score
+        # Volatility (max 15)
+        vol_score = min(15, metrics.get('daily_volatility', 0) / 2)
+        breakdown['volatility'] = vol_score
+        visual_breakdown['volatility'] = f"{self.METRIC_COLORS['volatility']}{self.METRIC_EMOJIS['volatility']} Volatility: {vol_score:.1f}{self.COLOR_RESET}"
+        score += vol_score
+        # Leverage (max 10, assume 50x+ is 10)
+        leverage = metrics.get('leverage', 50)
+        lev_score = 10 if leverage >= 100 else 8 if leverage >= 50 else 5
+        breakdown['leverage'] = lev_score
+        visual_breakdown['leverage'] = f"{self.METRIC_COLORS['leverage']}{self.METRIC_EMOJIS['leverage']} Leverage: {lev_score}{self.COLOR_RESET}"
+        score += lev_score
+        # Tick Size (max 10, smaller is better)
+        tick = metrics.get('tick_size', 0.01)
+        tick_score = 10 if tick < 0.001 else 8 if tick < 0.01 else 5
+        breakdown['tick_size'] = tick_score
+        visual_breakdown['tick_size'] = f"{self.METRIC_COLORS['tick_size']}{self.METRIC_EMOJIS['tick_size']} Tick Size: {tick_score}{self.COLOR_RESET}"
+        score += tick_score
+        # Liquidity (max 10, based on volume)
+        liq_score = min(10, volume_score)
+        breakdown['liquidity'] = liq_score
+        visual_breakdown['liquidity'] = f"{self.METRIC_COLORS['liquidity']}{self.METRIC_EMOJIS['liquidity']} Liquidity: {liq_score}{self.COLOR_RESET}"
+        score += liq_score
+        # OBV (max 7, normalized)
+        obv = metrics.get('obv', 0)
+        obv_score = min(7, abs(obv) / 1e7)
+        breakdown['obv'] = obv_score
+        visual_breakdown['obv'] = f"{self.METRIC_COLORS['obv']}{self.METRIC_EMOJIS['obv']} OBV: {obv_score:.1f}{self.COLOR_RESET}"
+        score += obv_score
+        # Momentum (max 10, normalized ROC)
+        momentum = metrics.get('momentum', 0)
+        mom_score = min(10, abs(momentum) * 10)
+        breakdown['momentum'] = mom_score
+        visual_breakdown['momentum'] = f"{self.METRIC_COLORS['momentum']}{self.METRIC_EMOJIS['momentum']} Momentum: {mom_score:.1f}{self.COLOR_RESET}"
+        score += mom_score
+        # RSI (max 10, extreme values get higher score)
+        rsi = metrics.get('rsi', 50)
+        rsi_score = 10 if rsi < 40 or rsi > 60 else 5
+        breakdown['rsi'] = rsi_score
+        visual_breakdown['rsi'] = f"{self.METRIC_COLORS['rsi']}{self.METRIC_EMOJIS['rsi']} RSI: {rsi_score}{self.COLOR_RESET}"
+        score += rsi_score
+        # SuperTrend (max 15, strong trend = high score)
+        st = metrics.get('supertrend', 0)
+        st_score = 15 if st else 7
+        breakdown['supertrend'] = st_score
+        visual_breakdown['supertrend'] = f"{self.METRIC_COLORS['supertrend']}{self.METRIC_EMOJIS['supertrend']} SuperTrend: {st_score}{self.COLOR_RESET}"
+        score += st_score
+        # Sharpe Ratio (max 10)
+        sharpe = perf.get('sharpe_ratio', 0) if perf else 0
+        sharpe_score = min(10, max(0, sharpe * 2))
+        breakdown['sharpe'] = sharpe_score
+        visual_breakdown['sharpe'] = f"{self.METRIC_COLORS['sharpe']}{self.METRIC_EMOJIS['sharpe']} Sharpe: {sharpe_score:.1f}{self.COLOR_RESET}"
+        score += sharpe_score
+        # Profit Factor (max 10)
+        pf = perf.get('profit_factor', 1) if perf else 1
+        pf_score = min(10, max(0, (pf-1)*5))
+        breakdown['profit_factor'] = pf_score
+        visual_breakdown['profit_factor'] = f"{self.METRIC_COLORS['profit_factor']}{self.METRIC_EMOJIS['profit_factor']} Profit Factor: {pf_score:.1f}{self.COLOR_RESET}"
+        score += pf_score
+        # Win/Loss (max 10)
+        win_rate = perf.get('win_rate', 0.5) if perf else 0.5
+        wl_score = min(10, win_rate * 10)
+        breakdown['win_loss'] = wl_score
+        visual_breakdown['win_loss'] = f"{self.METRIC_COLORS['win_loss']}{self.METRIC_EMOJIS['win_loss']} Win/Loss: {wl_score:.1f}{self.COLOR_RESET}"
+        score += wl_score
+        # Drawdown (max 10, lower is better)
+        dd = perf.get('max_drawdown', 0.2) if perf else 0.2
+        dd_score = 10 if dd < 0.1 else 7 if dd < 0.2 else 4
+        breakdown['drawdown'] = dd_score
+        visual_breakdown['drawdown'] = f"{self.METRIC_COLORS['drawdown']}{self.METRIC_EMOJIS['drawdown']} Drawdown: {dd_score}{self.COLOR_RESET}"
+        score += dd_score
+        # Consistency (max 10, higher = more stable)
+        consistency = perf.get('consistency', 0.5) if perf else 0.5
+        cons_score = min(10, consistency * 10)
+        breakdown['consistency'] = cons_score
+        visual_breakdown['consistency'] = f"{self.METRIC_COLORS['consistency']}{self.METRIC_EMOJIS['consistency']} Consistency: {cons_score:.1f}{self.COLOR_RESET}"
+        score += cons_score
+        # 2. MTF Trend Bonus/Penalty
+        mtf_trend = 'neutral'
+        mtf_bonus = 0
+        mtf_icon = ''
+        if mtf_signals:
+            bullish = sum(1 for s in mtf_signals if s == 'bullish')
+            bearish = sum(1 for s in mtf_signals if s == 'bearish')
+            if bullish > len(mtf_signals)//2:
+                mtf_trend = 'bullish'
+                mtf_bonus = score * 0.5
+                mtf_icon = '📈'
+            elif bearish > len(mtf_signals)//2:
+                mtf_trend = 'bearish'
+                mtf_bonus = -score * 0.5
+                mtf_icon = '📉'
+        score += mtf_bonus
+        # 3. Assign tier
+        tier = next(t for s, t in self.TIERS if score >= s)
+        # 4. Visual summary string
+        summary = f"{tier} | Score: {score:.2f} {mtf_icon}\n" + \
+                  " | ".join(visual_breakdown.values())
+        # 5. Return full breakdown
+        return {
+            'score': round(score, 2),
+            'tier': tier,
+            'mtf_trend': mtf_trend,
+            'metrics_breakdown': breakdown,
+            'visual_breakdown': visual_breakdown,
+            'summary': summary
+        }
+
 # Function to run the scanner
 async def scan_for_volatile_coins(api_key: str = None, api_secret: str = None, 
                                 testnet: bool = True, top_n: int = 20, min_volume: float = 1000000) -> Dict[str, List[Dict[str, Any]]]:
@@ -804,10 +970,19 @@ def run_volatility_scan(api_key: str = None, api_secret: str = None,
 if __name__ == "__main__":
     # Run independently for testing
     results = run_volatility_scan(top_n=10)
-    
-    # Print results
+    ranker = EnhancedMarketRanker()
+    # Print results with full visual scoring
     for timeframe, coins in results.items():
         print(f"\nTop volatile coins for {timeframe} timeframe:")
         for i, coin in enumerate(coins, 1):
-            print(f"{i}. {coin['symbol']} - Appeal Score: {coin['appeal_score']:.2f}, "
-                 f"Vol: {coin['daily_volatility']:.2f}%, ATR%: {coin['atr_pct']:.2f}%")
+            # Use the ranker to get the full visual summary
+            perf = {
+                'sharpe_ratio': coin.get('sharpe_ratio', 0),
+                'profit_factor': coin.get('profit_factor', 1),
+                'win_rate': coin.get('win_rate', 0.5),
+                'max_drawdown': coin.get('max_drawdown', 0.2),
+                'consistency': coin.get('consistency', 0.5),
+            }
+            mtf_signals = coin.get('mtf_signals', None)
+            summary = ranker.score_market(coin, mtf_signals, perf)['summary']
+            print(f"{i}. {coin['symbol']}\n{summary}\n{'-'*100}")
