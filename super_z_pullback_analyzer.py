@@ -60,17 +60,24 @@ class SuperZPullbackAnalyzer:
     
     def __init__(self, exchange_id: str = 'bitget'):
         # Load Bitget credentials from env/config
-        api_key = os.getenv('BITGET_API_KEY', 'YOUR_MAINNET_API_KEY')
-        api_secret = os.getenv('BITGET_API_SECRET', 'YOUR_MAINNET_API_SECRET')
-        api_password = os.getenv('BITGET_API_PASSWORD', 'YOUR_MAINNET_API_PASSWORD')
+        api_key = os.getenv('BITGET_API_KEY', 'YOUR_API_KEY')
+        api_secret = os.getenv('BITGET_API_SECRET', 'YOUR_API_SECRET')
+        api_password = os.getenv('BITGET_PASSPHRASE', 'YOUR_PASSPHRASE')  # Fixed: using PASSPHRASE not PASSWORD
+        
+        # Determine if using testnet
+        use_testnet = os.getenv('BITGET_TESTNET', 'true').lower() == 'true'
+        
         self.exchange = getattr(ccxt, "bitget")({
             'apiKey': api_key,
             'secret': api_secret,
             'password': api_password,
-            'sandbox': False,
+            'sandbox': use_testnet,  # Use testnet setting from env
             'enableRateLimit': True,
         })
-        print(f"{Back.GREEN}{Fore.BLACK}{Style.BRIGHT}INFO: Running in MAINNET/PRODUCTION mode! All data and trades are LIVE on Bitget.{Style.RESET_ALL}\n")
+        
+        mode = "TESTNET/DEMO" if use_testnet else "MAINNET/PRODUCTION"
+        color = Back.YELLOW if use_testnet else Back.RED
+        print(f"{color}{Fore.BLACK}{Style.BRIGHT}INFO: Running in {mode} mode! Trades are {'DEMO' if use_testnet else 'LIVE'} on Bitget.{Style.RESET_ALL}\n")
         self.pullback_events: List[PullbackEvent] = []
         self.max_trade_pct = 0.02  # 2% per trade
         self.max_total_pct = 0.36  # 36% max exposure
@@ -215,7 +222,7 @@ class SuperZPullbackAnalyzer:
             position_size = risk_per_trade / (entry_price * 0.02)  # Default 2% risk
             
         return position_size
-
+    
     def calculate_supertrend(self, df: pd.DataFrame, period: int = 50, multiplier: float = 1.0) -> Tuple[pd.Series, pd.Series]:
         """
         Calculate SuperTrend indicator
@@ -256,12 +263,20 @@ class SuperZPullbackAnalyzer:
         
         return supertrend, trend
     
-    def detect_signals(self, df, timeframe='5m'):
+    def detect_signals(self, df, timeframe='5m', loosen_level=None):
         """
         🚀 ULTIMATE CONSOLIDATED SIGNAL DETECTION with 100 REFINEMENTS 🚀
         Single optimized scan mode - NO MORE STRICT/MODERATE/LOOSE MODES
         All advanced features integrated into ONE supreme algorithm
+        
+        Args:
+            loosen_level: DEPRECATED - kept for backwards compatibility only
         """
+        # Ignore loosen_level parameter - it's deprecated but kept for compatibility
+        if loosen_level is not None:
+            import traceback
+            logging.warning(f"⚠️ loosen_level parameter is deprecated and ignored: {loosen_level}")
+            logging.warning(f"⚠️ Called from: {traceback.format_stack()[-2].strip()}")
         signals = []
         if len(df) < 50:
             return signals, df
@@ -880,7 +895,7 @@ class SuperZPullbackAnalyzer:
                 'filter_penalties': filter_penalties
             }
         }
-
+    
     async def fetch_data(self, symbol: str, timeframe: str = '4h', days: int = 90) -> pd.DataFrame:
         """Fetch OHLCV data for analysis"""
         try:
@@ -1392,7 +1407,7 @@ class SuperZPullbackAnalyzer:
 
     async def run_live_trading(self, symbols, timeframe='5m'):
         logging.info("🚀 STARTING LIVE TRADING WITH REAL MONEY!")
-        SCORE_THRESHOLD = 85  # Raised for live trading
+        SCORE_THRESHOLD = 45  # 🔥 REDUCED from 85 to 45 for more trades!
         
         async def process_symbol_lightning_fast(symbol):
             """⚡ ULTRA-FAST symbol processing"""

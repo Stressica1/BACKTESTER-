@@ -15,12 +15,23 @@ import aiohttp
 import json
 import requests
 from requests.adapters import HTTPAdapter
+import scipy.stats # Placeholder for potential future use
+from scipy.stats import norm
 
 # Suppress specific warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning, message="invalid value encountered in scalar divide")
 warnings.filterwarnings("ignore", category=FutureWarning)
 
 logger = logging.getLogger(__name__)
+
+# Define constants for default values if metrics are missing
+DEFAULT_FUNDING_RATE = 0.0001  # Neutral assumption
+DEFAULT_OPEN_INTEREST = 100000  # Arbitrary, to avoid zero division if used as divisor
+DEFAULT_MARK_INDEX_SPREAD = 0.0005 # 0.05%
+DEFAULT_LAUNCH_TIME = time.time() - (365 * 24 * 60 * 60) # Assume 1 year old
+DEFAULT_TAKER_FEE = 0.0006 # 0.06%
+DEFAULT_MAKER_FEE = 0.0002 # 0.02%
+DEFAULT_MAINT_MARGIN_RATE = 0.005 # 0.5%
 
 # Fast calculation functions using pure numpy
 def fast_atr(high, low, close, period=14):
@@ -226,24 +237,24 @@ class VolatilityScanner:
             since = int((datetime.now() - timedelta(days=lookback_days)).timestamp() * 1000)
             max_retries = 5
             for attempt in range(max_retries):
-                try:
-                    ohlcv = await asyncio.to_thread(
-                        self.exchange.fetch_ohlcv,
-                        symbol,
-                        timeframe,
-                        since=since,
+            try:
+                ohlcv = await asyncio.to_thread(
+                    self.exchange.fetch_ohlcv,
+                    symbol,
+                    timeframe,
+                    since=since,
                         limit=500
-                    )
+                )
                     break
                 except ccxt.RateLimitExceeded:
                     logger.warning(f"[429] Rate limit exceeded for {symbol} {timeframe}, retrying (attempt {attempt+1})...")
                     await asyncio.sleep(2 ** attempt)
-                except Exception as e:
+            except Exception as e:
                     if '429' in str(e):
                         logger.warning(f"[429] Too Many Requests for {symbol} {timeframe}, retrying (attempt {attempt+1})...")
                         await asyncio.sleep(2 ** attempt)
                         continue
-                    return None
+                return None
             else:
                 logger.error(f"Failed to fetch {symbol} {timeframe} after {max_retries} retries due to rate limits.")
                 return None
@@ -817,10 +828,38 @@ class EnhancedMarketRanker:
     # Animation frames for loading states
     LOADING_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
-    def __init__(self, mtf_timeframes=None):
-        self.mtf_timeframes = mtf_timeframes or ["15m", "1h", "4h", "1d"]
-        self.st_period = 50
-        self.st_multiplier = 1.0
+    def __init__(self, mtf_weights=None, base_max_score=100):
+        if mtf_weights is None:
+            self.mtf_weights = {'15m': 0.15, '1h': 0.25, '4h': 0.30, '1d': 0.30}
+        else:
+            self.mtf_weights = mtf_weights
+        self.base_max_score = base_max_score
+        self.metrics_breakdown = {}
+        self.perf_data = {}
+
+        # Define metric configurations: (weight, is_positive_correlation_to_score, normalization_type, params)
+        # Normalization types: 'direct_value', 'percentage_of_max', 'percentile', 'inverse_ratio', 'log_transform', 'range_map'
+        # params for 'range_map': [input_min, input_max, output_min, output_max] (output typically 0-1 or 0-10 for sub-scores)
+        # params for 'percentile': (not directly used here, handled by overall percentile scaling if chosen)
+        self.metric_configs = {
+            'volatility': {'weight': 15, 'positive': True, 'norm_type': 'range_map', 'params': [0, 0.2, 0, 10]}, # 0-20% daily vol maps to 0-10
+            'volume_24h': {'weight': 15, 'positive': True, 'norm_type': 'log_transform', 'params': [100000, 10]}, # Scale by log, base_value, scale_factor
+            'leverage': {'weight': 5, 'positive': True, 'norm_type': 'direct_value', 'params': [125, 10]}, # Max leverage, scale_factor (max_leverage/params[0] * params[1])
+            'tick_size_impact': {'weight': 10, 'positive': False, 'norm_type': 'range_map', 'params': [0, 0.001, 0, 10]}, # 0-0.1% tick size as % of price maps to 0-10 (lower is better)
+            'liquidity_score': {'weight': 10, 'positive': True, 'norm_type': 'direct_value', 'params': [1, 10]}, # Assume liquidity score is 0-1, maps to 0-10
+            'obv_slope': {'weight': 10, 'positive': True, 'norm_type': 'range_map', 'params': [-45, 45, 0, 10]}, # OBV slope angle maps to 0-10
+            'momentum': {'weight': 10, 'positive': True, 'norm_type': 'range_map', 'params': [-0.1, 0.1, 0, 10]}, # -10% to +10% momentum maps to 0-10
+            'rsi': {'weight': 5, 'positive': False, 'norm_type': 'rsi_deviation', 'params': [50, 10]}, # Deviate from 50, max_score_contribution
+
+            # New Metrics
+            'funding_rate_impact': {'weight': 5, 'positive': False, 'norm_type': 'range_map', 'params': [0, 0.001, 0, 10]}, # Absolute funding rate 0 to 0.1% maps to score 0-10 (lower abs is better)
+            'open_interest': {'weight': 5, 'positive': True, 'norm_type': 'log_transform', 'params': [1000000, 10]}, # Log transform for open interest in quote currency
+            'mark_index_spread_impact': {'weight': 3, 'positive': False, 'norm_type': 'range_map', 'params': [0, 0.002, 0, 10]}, # 0 to 0.2% spread maps to 0-10 (lower is better)
+            'contract_age_bonus': {'weight': 2, 'positive': True, 'norm_type': 'range_map', 'params': [0, 365*2, 0, 5]}, # 0 to 2 years age maps to 0-5 bonus points
+            'fee_impact': {'weight': 3, 'positive': False, 'norm_type': 'range_map', 'params': [0.0002, 0.001, 0, 10]}, # Taker fee 0.02% to 0.1% maps to 0-10 (lower is better)
+            'maint_margin_impact': {'weight': 2, 'positive': False, 'norm_type': 'range_map', 'params': [0.004, 0.02, 0, 10]} # Maint margin 0.4% to 2% maps to 0-10 (lower is better)
+        }
+        self.total_weight = sum(config['weight'] for config in self.metric_configs.values())
         self.animation_index = 0
         self.last_update = time.time()
 
@@ -865,154 +904,315 @@ class EnhancedMarketRanker:
                 visual_lines.append(f"{metric}: {score:.1f}")
         return "\n".join(visual_lines)
 
-    def score_market(self, metrics, mtf_signals=None, perf=None):
-        # Define max points for each metric
-        metric_points = {
-            'volume': 20,
-            'volatility': 15,
-            'leverage': 10,
-            'tick_size': 10,
-            'liquidity': 10,
-            'obv': 7,
-            'momentum': 10,
-            'rsi': 10,
-            'supertrend': 15,
-            'sharpe': 10,
-            'profit_factor': 10,
-            'win_loss': 10,
-            'drawdown': 10,
-            'consistency': 10,
-        }
-        breakdown = {}
-        visual_breakdown = {}
-        # Volume (log scale, max 20)
-        volume = metrics.get('volume', 0)
-        volume_score = min(metric_points['volume'], 5 * np.log10(max(volume, 1)))
-        breakdown['volume'] = volume_score
-        visual_breakdown['volume'] = self.create_metric_line('volume', volume, volume_score)
-        # Volatility (max 15)
-        vol_score = min(metric_points['volatility'], metrics.get('daily_volatility', 0) / 2)
-        breakdown['volatility'] = vol_score
-        visual_breakdown['volatility'] = self.create_metric_line('volatility', metrics.get('daily_volatility', 0), vol_score)
-        # Leverage (max 10, assume 50x+ is 10)
-        leverage = metrics.get('leverage', 50)
-        lev_score = metric_points['leverage'] if leverage >= 100 else 8 if leverage >= 50 else 5
-        breakdown['leverage'] = lev_score
-        visual_breakdown['leverage'] = self.create_metric_line('leverage', leverage, lev_score)
-        # Tick Size (max 10, smaller is better)
-        tick = metrics.get('tick_size', 0.01)
-        tick_score = metric_points['tick_size'] if tick < 0.001 else 8 if tick < 0.01 else 5
-        breakdown['tick_size'] = tick_score
-        visual_breakdown['tick_size'] = self.create_metric_line('tick_size', tick, tick_score)
-        # Liquidity (max 10, based on volume)
-        liq_score = min(metric_points['liquidity'], volume_score)
-        breakdown['liquidity'] = liq_score
-        visual_breakdown['liquidity'] = self.create_metric_line('liquidity', volume, liq_score)
-        # OBV (max 7, normalized)
-        obv = metrics.get('obv', 0)
-        obv_score = min(metric_points['obv'], abs(obv) / 1e7)
-        breakdown['obv'] = obv_score
-        visual_breakdown['obv'] = self.create_metric_line('obv', obv, obv_score)
-        # Momentum (max 10, normalized ROC)
-        momentum = metrics.get('momentum', 0)
-        mom_score = min(metric_points['momentum'], abs(momentum) * 10)
-        breakdown['momentum'] = mom_score
-        visual_breakdown['momentum'] = self.create_metric_line('momentum', momentum, mom_score)
-        # RSI (max 10, extreme values get higher score)
-        rsi = metrics.get('rsi', 50)
-        rsi_score = metric_points['rsi'] if rsi < 40 or rsi > 60 else 5
-        breakdown['rsi'] = rsi_score
-        visual_breakdown['rsi'] = self.create_metric_line('rsi', rsi, rsi_score)
-        # SuperTrend (max 15, strong trend = high score)
-        st_metrics = metrics.get('supertrend_metrics', {})
-        st_score = 0
-        trend_score = st_metrics.get('supertrend', 0)
-        st_score += 5 if trend_score != 0 else 0
-        trend_strength = st_metrics.get('trend_strength', 0)
-        st_score += min(5, trend_strength * 10)
-        trend_consistency = st_metrics.get('trend_consistency', 0)
-        st_score += min(5, trend_consistency * 10)
-        st_score = min(metric_points['supertrend'], st_score)
-        breakdown['supertrend'] = st_score
-        visual_breakdown['supertrend'] = self.create_metric_line('supertrend', st_score, st_score)
-        # Sharpe Ratio (max 10)
-        sharpe = perf.get('sharpe_ratio', 0) if perf else 0
-        sharpe_score = min(metric_points['sharpe'], max(0, sharpe * 2))
-        breakdown['sharpe'] = sharpe_score
-        visual_breakdown['sharpe'] = self.create_metric_line('sharpe', sharpe, sharpe_score)
-        # Profit Factor (max 10)
-        pf = perf.get('profit_factor', 1) if perf else 1
-        pf_score = min(metric_points['profit_factor'], max(0, (pf-1)*5))
-        breakdown['profit_factor'] = pf_score
-        visual_breakdown['profit_factor'] = self.create_metric_line('profit_factor', pf, pf_score)
-        # Win/Loss (max 10)
-        win_rate = perf.get('win_rate', 0.5) if perf else 0.5
-        wl_score = min(metric_points['win_loss'], win_rate * 10)
-        breakdown['win_loss'] = wl_score
-        visual_breakdown['win_loss'] = self.create_metric_line('win_loss', win_rate, wl_score)
-        # Drawdown (max 10, lower is better)
-        dd = perf.get('max_drawdown', 0.2) if perf else 0.2
-        dd_score = metric_points['drawdown'] if dd < 0.1 else 7 if dd < 0.2 else 4
-        breakdown['drawdown'] = dd_score
-        visual_breakdown['drawdown'] = self.create_metric_line('drawdown', dd, dd_score)
-        # Consistency (max 10, higher = more stable)
-        consistency = perf.get('consistency', 0.5) if perf else 0.5
-        cons_score = min(metric_points['consistency'], consistency * 10)
-        breakdown['consistency'] = cons_score
-        visual_breakdown['consistency'] = self.create_metric_line('consistency', consistency, cons_score)
-        # Sum all metric points for raw score (max 100)
-        raw_score = sum(breakdown.get(k, 0) for k in metric_points)
-        # 2. MTF Trend Bonus/Penalty
-        mtf_trend = 'neutral'
-        mtf_bonus = 0
-        mtf_icon = ''
-        if mtf_signals:
-            bullish = sum(1 for s in mtf_signals if s == 'bullish')
-            bearish = sum(1 for s in mtf_signals if s == 'bearish')
-            if bullish > len(mtf_signals)//2:
-                mtf_trend = 'bullish'
-                mtf_bonus = raw_score * 0.5
-                mtf_icon = '📈'
-            elif bearish > len(mtf_signals)//2:
-                mtf_trend = 'bearish'
-                mtf_bonus = -raw_score * 0.5
-                mtf_icon = '📉'
-        final_score = raw_score + mtf_bonus
-        final_score = max(0, min(100, final_score))
-        # 3. Assign tier
-        tier = next(t for s, t in self.TIERS if final_score >= s)
-        # 4. Visual summary string
-        summary = f"{self.create_tier_banner(tier, final_score)}\n{self.create_visual_breakdown(metrics, breakdown)}\n{mtf_icon}"
-        # 5. Return full breakdown
+    def _normalize_metric(self, value, norm_type, params, metric_name=""):
+        try:
+            if value is None: # Handle None values upfront for most types
+                # For range_map, None should map to output_min
+                if norm_type == 'range_map' and params and len(params) == 4:
+                    return params[2] # output_min
+                return 0 # Default score for None if not range_map
+
+            if norm_type == 'direct_value': 
+                # Assumes value is already scaled appropriately (e.g. a pre-calculated 0-10 score component)
+                # params can be [max_expected_value_for_full_score, score_multiplier]
+                # e.g. if value is 0-1, params=[1, 10] maps it to 0-10.
+                # If value is max_leverage, params=[125, 10] -> (value/125)*10
+                # If value is max_leverage, params=[125, 10] -> (value/125)*10
+                if params and len(params) == 2:
+                    max_val, multiplier = params
+                    return (value / max_val) * multiplier if max_val != 0 else 0
+                return value # Return as is if no params
+            
+            elif norm_type == 'percentage_of_max': 
+                max_possible, score_multiplier = params
+                if max_possible == 0: return 0
+                return (value / max_possible) * score_multiplier
+            
+            elif norm_type == 'log_transform': 
+                base_val, scale_factor = params
+                if value <= 0: return 0 # Log is undefined for non-positive
+                # Adding 1 inside log to ensure that if value == base_val, log result is not 0 before scaling
+                # Max(1, value / base_val) handles cases where value might be less than base_val, preventing log of sub-1 values from being negative.
+                normalized_value = np.log(max(1, value / base_val) + 1) 
+                return normalized_value * scale_factor
+            
+            elif norm_type == 'range_map': 
+                input_min, input_max, output_min, output_max = params
+                if input_max == input_min: return output_min # Avoid division by zero
+                clamped_value = max(input_min, min(input_max, value))
+                return output_min + (clamped_value - input_min) * (output_max - output_min) / (input_max - input_min)
+            
+            elif norm_type == 'rsi_deviation': 
+                mid_point, max_score_contribution = params
+                deviation = abs(value - mid_point)
+                # Score is inversely proportional to deviation. Max deviation is mid_point (e.g. 50 for RSI from 0-100 scale)
+                # (1 - deviation / mid_point) gives 1 for no deviation, 0 for max deviation.
+                score = max_score_contribution * (1 - (deviation / mid_point)) if mid_point != 0 else 0
+                return max(0, score) # Ensure score is not negative
+            
+            elif norm_type == 'inverse_ratio': 
+                # Example: (1 / (value_normalized_to_0_1 + epsilon)) * scale_factor
+                # This type is tricky and often better handled by range_map with inverted logic (positive=False in config)
+                # For instance, for fees: map fee_range [0.0002, 0.001] to score_range [10, 0]
+                # So if 'positive' is False in metric_config, the interpretation of range_map already handles inverse.
+                # We can remove 'inverse_ratio' or make it very specific if needed.
+                # For now, let's assume range_map with positive=False covers this.
+                return 0 # Placeholder - prefer range_map for inverse relationships
+            
+            else:
+                # Fallback for unknown norm_type, or if direct value is intended without explicit type
+                return value 
+        except Exception as e:
+            print(f"Error normalizing metric {metric_name} with value {value} (type {type(value)}), norm_type '{norm_type}', params {params}: {e}")
+            return 0 # Return 0 score on error
+
+    def score_market(self, market_data, mtf_signals, perf_data):
+        self.metrics_breakdown = {}
+        self.perf_data = perf_data # Store perf_data if needed later
+        total_raw_weighted_score = 0 # Sum of (normalized_metric_score * weight)
+        
+        # Ensure market_data and its 'info' field exist
+        market_info = market_data.get('info', {})
+        ticker_info = market_data.get('ticker', {}).get('info', {})
+        
+        # Robustly get current_price, falling back to perf_data or 1.0
+        current_price = market_data.get('ticker', {}).get('last')
+        if current_price is None or current_price == 0:
+            current_price = self.perf_data.get('current_price') # Check perf_data next
+        if current_price is None or current_price == 0:
+            current_price = ticker_info.get('lastPr') # Check ticker_info as another fallback
+        if current_price is None or current_price == 0:
+            current_price = 1.0 # Final fallback to avoid division by zero
+        try:
+            current_price = float(current_price)
+        except (ValueError, TypeError):
+            current_price = 1.0
+
+        # --- Standard Metrics ---
+        volatility = self.perf_data.get('volatility', 0)
+        self.metrics_breakdown['Volatility (%)'] = f"{volatility*100:.2f}"
+        cfg = self.metric_configs['volatility']
+        total_raw_weighted_score += self._normalize_metric(volatility, cfg['norm_type'], cfg['params'], 'volatility') * cfg['weight']
+
+        volume_24h_quote = market_data.get('ticker', {}).get('quoteVolume', 0)
+        if volume_24h_quote is None: volume_24h_quote = 0
+        try: volume_24h_quote = float(volume_24h_quote)
+        except: volume_24h_quote = 0
+        self.metrics_breakdown['Volume 24h (Quote)'] = f"{volume_24h_quote:,.0f}"
+        cfg = self.metric_configs['volume_24h']
+        total_raw_weighted_score += self._normalize_metric(volume_24h_quote, cfg['norm_type'], cfg['params'], 'volume_24h') * cfg['weight']
+
+        leverage = market_data.get('limits', {}).get('leverage', {}).get('max', market_info.get('maxLeverage', 1.0))
+        if leverage is None: leverage = 1.0
+        try: leverage = float(leverage)
+        except: leverage = 1.0
+        self.metrics_breakdown['Max Leverage'] = f"{leverage:.0f}x"
+        cfg = self.metric_configs['leverage']
+        total_raw_weighted_score += self._normalize_metric(leverage, cfg['norm_type'], cfg['params'], 'leverage') * cfg['weight']
+
+        tick_size = market_data.get('precision', {}).get('price', 0.000001) # Price increment
+        if tick_size is None: tick_size = 0.000001
+        try: tick_size = float(tick_size)
+        except: tick_size = 0.000001
+        tick_size_as_percentage = (tick_size / current_price) if current_price != 0 else 0
+        self.metrics_breakdown['Tick Size Impact'] = f"{tick_size_as_percentage*100:.4f}% (of price)"
+        cfg = self.metric_configs['tick_size_impact']
+        total_raw_weighted_score += self._normalize_metric(tick_size_as_percentage, cfg['norm_type'], cfg['params'], 'tick_size_impact') * cfg['weight']
+
+        liquidity_score_val = self.perf_data.get('liquidity_score', 0) # Assume this is pre-calculated 0-1
+        self.metrics_breakdown['Liquidity Score (0-1)'] = f"{liquidity_score_val:.2f}"
+        cfg = self.metric_configs['liquidity_score']
+        total_raw_weighted_score += self._normalize_metric(liquidity_score_val, cfg['norm_type'], cfg['params'], 'liquidity_score') * cfg['weight']
+
+        obv_slope = self.perf_data.get('obv_slope', 0)
+        self.metrics_breakdown['OBV Slope (degrees)'] = f"{obv_slope:.2f}"
+        cfg = self.metric_configs['obv_slope']
+        total_raw_weighted_score += self._normalize_metric(obv_slope, cfg['norm_type'], cfg['params'], 'obv_slope') * cfg['weight']
+
+        momentum = self.perf_data.get('momentum', 0) # e.g., 1-day price change
+        self.metrics_breakdown['Momentum (1d Change %)'] = f"{momentum*100:.2f}"
+        cfg = self.metric_configs['momentum']
+        total_raw_weighted_score += self._normalize_metric(momentum, cfg['norm_type'], cfg['params'], 'momentum') * cfg['weight']
+        
+        rsi = self.perf_data.get('rsi', 50)
+        self.metrics_breakdown['RSI'] = f"{rsi:.2f}"
+        cfg = self.metric_configs['rsi']
+        total_raw_weighted_score += self._normalize_metric(rsi, cfg['norm_type'], cfg['params'], 'rsi') * cfg['weight']
+
+        # --- New Metrics ---
+        funding_rate_str = ticker_info.get('capitalRate', market_info.get('fundFeeRate'))
+        funding_rate = DEFAULT_FUNDING_RATE # Default from constants
+        if funding_rate_str is not None:
+            try: funding_rate = float(funding_rate_str)
+            except (ValueError, TypeError):
+                # If conversion fails, funding_rate remains DEFAULT_FUNDING_RATE
+                pass 
+        self.metrics_breakdown['Funding Rate (%)'] = f"{funding_rate*100:.4f}"
+        cfg_fr = self.metric_configs['funding_rate_impact']
+        total_raw_weighted_score += self._normalize_metric(abs(funding_rate), cfg_fr['norm_type'], cfg_fr['params'], 'funding_rate_impact') * cfg_fr['weight']
+
+        open_interest_contracts_str = ticker_info.get('openInterest')
+        open_interest_contracts = DEFAULT_OPEN_INTEREST # Default
+        if open_interest_contracts_str is not None:
+            try: open_interest_contracts = float(open_interest_contracts_str)
+            except (ValueError, TypeError): pass 
+        
+        contract_size_str = market_data.get('contractSize', market_info.get('lotSize'))
+        contract_size = 1.0 # Default
+        if contract_size_str is not None:
+            try: contract_size = float(contract_size_str)
+            except (ValueError, TypeError): pass
+        if contract_size == 0: contract_size = 1.0 # Avoid division by zero
+
+        open_interest_quote = open_interest_contracts * contract_size * current_price
+        self.metrics_breakdown['Open Interest (Quote)'] = f"{open_interest_quote:,.0f}"
+        cfg_oi = self.metric_configs['open_interest']
+        total_raw_weighted_score += self._normalize_metric(open_interest_quote, cfg_oi['norm_type'], cfg_oi['params'], 'open_interest') * cfg_oi['weight']
+
+        mark_price_str = ticker_info.get('markPrice')
+        index_price_str = ticker_info.get('indexPrice')
+        mark_price, index_price = current_price, current_price # Default to current_price if specific values are missing
+        if mark_price_str is not None: 
+            try: mark_price = float(mark_price_str)
+            except (ValueError, TypeError): pass
+        if index_price_str is not None: 
+            try: index_price = float(index_price_str)
+            except (ValueError, TypeError): pass
+        
+        mark_index_spread_abs = abs(mark_price - index_price) / index_price if index_price != 0 else 0
+        self.metrics_breakdown['Mark/Index Spread (%)'] = f"{mark_index_spread_abs*100:.4f}"
+        cfg_mis = self.metric_configs['mark_index_spread_impact']
+        total_raw_weighted_score += self._normalize_metric(mark_index_spread_abs, cfg_mis['norm_type'], cfg_mis['params'], 'mark_index_spread_impact') * cfg_mis['weight']
+        
+        launch_time_str = market_info.get('launchTime') # Expects ms string from Bitget
+        launch_timestamp_s = DEFAULT_LAUNCH_TIME # Default
+        if launch_time_str is not None:
+            try: launch_timestamp_s = int(launch_time_str) / 1000 # Convert ms to s
+            except (ValueError, TypeError): pass
+        
+        contract_age_days = (time.time() - launch_timestamp_s) / (24 * 60 * 60)
+        self.metrics_breakdown['Contract Age (Days)'] = f"{contract_age_days:.0f}"
+        cfg_age = self.metric_configs['contract_age_bonus']
+        total_raw_weighted_score += self._normalize_metric(contract_age_days, cfg_age['norm_type'], cfg_age['params'], 'contract_age_bonus') * cfg_age['weight']
+
+        taker_fee_str = market_data.get('taker', market_info.get('takerFeeRate'))
+        taker_fee = DEFAULT_TAKER_FEE # Default
+        if taker_fee_str is not None:
+            try: taker_fee = float(taker_fee_str)
+            except (ValueError, TypeError): pass
+
+        self.metrics_breakdown['Taker Fee (%)'] = f"{taker_fee*100:.4f}"
+        cfg_fee = self.metric_configs['fee_impact']
+        total_raw_weighted_score += self._normalize_metric(taker_fee, cfg_fee['norm_type'], cfg_fee['params'], 'fee_impact') * cfg_fee['weight']
+
+        maint_margin_rate_str = market_info.get('maintainMarginRate')
+        maint_margin_rate = DEFAULT_MAINT_MARGIN_RATE # Default
+        if maint_margin_rate_str is not None:
+            try: maint_margin_rate = float(maint_margin_rate_str)
+            except (ValueError, TypeError): pass
+        self.metrics_breakdown['Maint. Margin Rate (%)'] = f"{maint_margin_rate*100:.2f}"
+        cfg_mmr = self.metric_configs['maint_margin_impact']
+        total_raw_weighted_score += self._normalize_metric(maint_margin_rate, cfg_mmr['norm_type'], cfg_mmr['params'], 'maint_margin_impact') * cfg_mmr['weight']
+        
+        # --- MTF Scoring & Finalization ---
+        mtf_overall_trend = "Neutral"
+        weighted_mtf_numeric_score = 0 # for trend calculation
+
+        if mtf_signals: # mtf_signals is expected to be a dict like {'15m': {'trend': 'Up', ...}, ...}
+            self.metrics_breakdown['MTF Signals'] = {}
+            for tf, signal_data in mtf_signals.items():
+                trend = "Neutral" # Default trend for a timeframe if not specified
+                if isinstance(signal_data, dict):
+                    trend = signal_data.get('trend', "Neutral")
+                elif isinstance(signal_data, str): # Allow direct trend string e.g., mtf_signals={'1h': 'Up'}
+                    trend = signal_data
+                
+                self.metrics_breakdown['MTF Signals'][tf] = trend
+                
+                tf_weight = self.mtf_weights.get(tf, 0)
+                trend_value = 0
+                if trend == 'Up': trend_value = 1
+                elif trend == 'Strong Up': trend_value = 1 # Treat Strong Up as Up for numeric scoring for now
+                elif trend == 'Down': trend_value = -1
+                elif trend == 'Strong Down': trend_value = -1 # Treat Strong Down as Down
+                weighted_mtf_numeric_score += trend_value * tf_weight
+            
+            # Determine overall MTF trend string based on the weighted numeric score
+            # Sum of weights can be > 1 or < 1 depending on config. For example, 0.15+0.25+0.3+0.3 = 1.0
+            # Thresholds for trend categories can be relative to sum of positive/negative weights
+            sum_of_weights = sum(self.mtf_weights.values())
+            if sum_of_weights == 0: sum_of_weights = 1 # Avoid division by zero if weights are all zero
+
+            if weighted_mtf_numeric_score >= 0.7 * sum_of_weights: mtf_overall_trend = "Very Strong Up"
+            elif weighted_mtf_numeric_score >= 0.3 * sum_of_weights: mtf_overall_trend = "Strong Up"
+            elif weighted_mtf_numeric_score > 0: mtf_overall_trend = "Up"
+            elif weighted_mtf_numeric_score <= -0.7 * sum_of_weights: mtf_overall_trend = "Very Strong Down"
+            elif weighted_mtf_numeric_score <= -0.3 * sum_of_weights: mtf_overall_trend = "Strong Down"
+            elif weighted_mtf_numeric_score < 0: mtf_overall_trend = "Down"
+            # If weighted_mtf_numeric_score is 0, it remains "Neutral"
+
+        self.metrics_breakdown['MTF Overall Trend'] = mtf_overall_trend
+
+        # Determine the maximum possible raw weighted score based on metric configurations
+        max_possible_raw_weighted_score = 0
+        for metric_key, cfg_item in self.metric_configs.items():
+            try:
+                max_sub_score_contribution = 0
+                norm_type = cfg_item.get('norm_type') # Use .get for safety
+                params = cfg_item.get('params', [])    # Use .get for safety
+
+                if norm_type == 'range_map':
+                    if len(params) > 3:
+                        max_sub_score_contribution = params[3] 
+                    else:
+                        max_sub_score_contribution = 10 # Fallback for malformed params
+                elif norm_type in ['rsi_deviation', 'direct_value', 'log_transform', 'percentage_of_max']:
+                    if len(params) > 1:
+                        max_sub_score_contribution = params[1]
+                    else: 
+                        max_sub_score_contribution = 10 # Fallback for malformed params
+                else: 
+                    max_sub_score_contribution = 10 # Fallback for unknown norm_type
+                
+                current_weight = cfg_item.get('weight', 0) # Use .get for safety
+                max_possible_raw_weighted_score += max_sub_score_contribution * current_weight
+            except Exception as e_cfg_loop:
+                print(f"Error processing metric_config for {metric_key}: {e_cfg_loop}. Using default contribution.")
+                max_possible_raw_weighted_score += 5 * cfg_item.get('weight', 1)
+
+        if max_possible_raw_weighted_score == 0: 
+            # Fallback if all weights are zero or configs are malformed
+            max_possible_raw_weighted_score = self.total_weight * 10 if self.total_weight > 0 else 100 
+
+        final_score = (total_raw_weighted_score / max_possible_raw_weighted_score) * self.base_max_score if max_possible_raw_weighted_score != 0 else 0
+        final_score = max(0, min(self.base_max_score, final_score)) # Clamp to [0, base_max_score]
+
+        tier = "PURE SHIT TIER"
+        if final_score >= 90: tier = "GODLIKE UNICORN BUSSY TIER"
+        elif final_score >= 80: tier = "GIGA CHAD TIER"
+        elif final_score >= 70: tier = "TOP G TIER"
+        elif final_score >= 60: tier = "DECENT TIER"
+        elif final_score >= 50: tier = "MID AF TIER"
+        elif final_score >= 40: tier = "LOW TIER"
+        elif final_score >= 30: tier = "BOTTOM OF THE BARREL TIER"
+        
+        self.metrics_breakdown['Calculated Score'] = f"{final_score:.2f} / {self.base_max_score}"
+        self.metrics_breakdown['Tier'] = tier
+        
+        summary_str = self._generate_summary_string(market_data.get('symbol', 'N/A'), final_score, tier, mtf_overall_trend)
+
         return {
-            'score': round(final_score, 2),
+            'symbol': market_data.get('symbol', 'N/A'),
+            'score': final_score,
             'tier': tier,
-            'mtf_trend': mtf_trend,
-            'metrics_breakdown': breakdown,
-            'visual_breakdown': visual_breakdown,
-            'summary': summary,
-            'animated_breakdown': self.create_animated_breakdown(breakdown)
+            'mtf_trend': mtf_overall_trend,
+            'metrics_breakdown': self.metrics_breakdown,
+            'perf_data': self.perf_data, # Pass along perf_data for inspection if needed
+            'summary': summary_str
         }
 
-    def create_animated_breakdown(self, breakdown: Dict[str, float]) -> str:
-        self.animation_index = (self.animation_index + 1) % len(self.LOADING_FRAMES)
-        loading = self.LOADING_FRAMES[self.animation_index]
-        animated = []
-        for metric, value in breakdown.items():
-            emoji = self.get_animated_emoji(metric, value)
-            color = self.get_gradient_color(metric, value)
-            animated.append(f"{loading} {color}{emoji} {metric}: {value:.1f}{self.COLOR_RESET}")
-        return "\n".join(animated)
-
-    def print_market_analysis(self, result: Dict):
-        print("\033[2J\033[H")  # Clear screen
-        print(result['summary'])
-        print("\nReal-time Analysis:")
-        print(result['animated_breakdown'])
-        if 'perf' in result:
-            print(f"\n{self.COLOR_BOLD}Performance Metrics:{self.COLOR_RESET}")
-            for metric, value in result['perf'].items():
-                print(f"  {metric}: {value:.2f}")
+    def _generate_summary_string(self, symbol, score, tier, mtf_trend):
+        # ... existing code ...
 
 # Function to run the scanner
 async def scan_for_volatile_coins(api_key: str = None, api_secret: str = None, 

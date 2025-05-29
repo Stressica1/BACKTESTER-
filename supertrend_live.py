@@ -19,6 +19,7 @@ import multiprocessing
 import sys
 import glob
 import psutil
+import itertools
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 from ratelimit import limits, sleep_and_retry
@@ -27,12 +28,41 @@ from watchdog.events import FileSystemEventHandler
 import threading
 import importlib
 
-# Configure logging
+# Bitget API Rate Limiting
+try:
+    from aiolimiter import AsyncLimiter
+except ImportError:
+    print("Installing aiolimiter for proper rate limiting...")
+    import subprocess
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "aiolimiter"])
+    from aiolimiter import AsyncLimiter
+
+# Import rate monitoring
+try:
+    from bitget_rate_monitor import record_api_request, get_rate_status, generate_rate_report
+except ImportError:
+    # Create dummy functions if monitor not available
+    def record_api_request(*args, **kwargs): pass
+    def get_rate_status(): return {}
+    def generate_rate_report(*args, **kwargs): return "Rate monitoring not available"
+
+# Configure logging with unified error logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('trading_unified.log'),
+        logging.StreamHandler()
+    ]
 )
 logger = logging.getLogger("SuperTrend")
+
+# Rate limit error logger
+rate_limit_logger = logging.getLogger("BitgetRateLimit")
+rate_limit_handler = logging.FileHandler('bitget_rate_limits.log')
+rate_limit_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+rate_limit_logger.addHandler(rate_limit_handler)
+rate_limit_logger.setLevel(logging.INFO)
 
 # 24-bit color helpers
 RESET = '\033[0m'
@@ -45,6 +75,122 @@ HOLD_FG = '\033[38;2;200;200;200m'
 TABLE_BG = '\033[48;2;30;30;40m'
 TABLE_FG = '\033[38;2;180;220;255m'
 ACCENT = '\033[38;2;255;0;255m'
+
+class BitgetRateLimiter:
+    """Comprehensive Bitget API rate limiting system"""
+    
+    def __init__(self):
+        # Public endpoints rate limiters (20 req/s)
+        self.public_limiters = {
+            'time': AsyncLimiter(20, 1),
+            'currencies': AsyncLimiter(20, 1),
+            'products': AsyncLimiter(20, 1),
+            'product': AsyncLimiter(20, 1),
+            'ticker': AsyncLimiter(20, 1),
+            'tickers': AsyncLimiter(20, 1),
+            'fills': AsyncLimiter(20, 1),
+            'candles': AsyncLimiter(20, 1),
+            'depth': AsyncLimiter(20, 1),
+            'transferRecords': AsyncLimiter(20, 1),
+            'orderInfo': AsyncLimiter(20, 1),
+            'open-orders': AsyncLimiter(20, 1),
+            'history': AsyncLimiter(20, 1),
+            'trade_fills': AsyncLimiter(20, 1)
+        }
+        
+        # Private endpoints rate limiters (10 req/s for most)
+        self.private_limiters = {
+            'assets': AsyncLimiter(10, 1),
+            'bills': AsyncLimiter(10, 1),
+            'orders': AsyncLimiter(10, 1),
+            'cancel-order': AsyncLimiter(10, 1),
+            'cancel-batch-orders': AsyncLimiter(10, 1),
+            'batch-orders': AsyncLimiter(5, 1)  # 5 req/s for batch orders
+        }
+        
+        # Global rate limiter for safety
+        self.global_limiter = AsyncLimiter(50, 1)  # Conservative global limit
+        
+        # WebSocket limits
+        self.ws_connections = 0
+        self.max_ws_connections = 20
+        self.max_subscriptions_per_connection = 240
+        
+        # Rate limit tracking
+        self.rate_limit_hits = 0
+        self.last_rate_limit_time = 0
+        self.consecutive_rate_limits = 0
+        
+    async def acquire_public(self, endpoint_type='ticker'):
+        """Acquire rate limit for public endpoint"""
+        try:
+            async with self.global_limiter:
+                if endpoint_type in self.public_limiters:
+                    async with self.public_limiters[endpoint_type]:
+                        return True
+                else:
+                    # Default to 20 req/s for unknown public endpoints
+                    async with self.public_limiters['ticker']:
+                        return True
+        except Exception as e:
+            rate_limit_logger.error(f"Error acquiring public rate limit for {endpoint_type}: {e}")
+            return False
+    
+    async def acquire_private(self, endpoint_type='orders'):
+        """Acquire rate limit for private endpoint"""
+        try:
+            async with self.global_limiter:
+                if endpoint_type in self.private_limiters:
+                    async with self.private_limiters[endpoint_type]:
+                        return True
+                else:
+                    # Default to 10 req/s for unknown private endpoints
+                    async with self.private_limiters['orders']:
+                        return True
+        except Exception as e:
+            rate_limit_logger.error(f"Error acquiring private rate limit for {endpoint_type}: {e}")
+            return False
+    
+    def handle_rate_limit_error(self, error_code, endpoint, retry_count=0):
+        """Handle rate limit errors with exponential backoff"""
+        self.rate_limit_hits += 1
+        self.last_rate_limit_time = time.time()
+        self.consecutive_rate_limits += 1
+        
+        # Calculate backoff time
+        base_delay = 2 ** min(retry_count, 6)  # Max 64 seconds
+        jitter = np.random.uniform(0.1, 0.5)
+        backoff_time = base_delay + jitter
+        
+        rate_limit_logger.warning(
+            f"Rate limit hit - Endpoint: {endpoint}, Error: {error_code}, "
+            f"Consecutive hits: {self.consecutive_rate_limits}, "
+            f"Backing off for {backoff_time:.2f}s"
+        )
+        
+        # If too many consecutive rate limits, extend backoff
+        if self.consecutive_rate_limits >= 5:
+            backoff_time *= 2
+            rate_limit_logger.error(
+                f"Excessive rate limiting detected! Extended backoff: {backoff_time:.2f}s"
+            )
+        
+        return backoff_time
+    
+    def reset_rate_limit_tracking(self):
+        """Reset rate limit tracking after successful requests"""
+        if time.time() - self.last_rate_limit_time > 60:  # Reset after 1 minute of no rate limits
+            self.consecutive_rate_limits = 0
+    
+    def get_suggested_wait_time(self, endpoint_type):
+        """Get suggested wait time for an endpoint"""
+        if endpoint_type in self.public_limiters:
+            return 1.0 / 20  # 50ms for 20 req/s
+        elif endpoint_type in self.private_limiters:
+            if endpoint_type == 'batch-orders':
+                return 1.0 / 5  # 200ms for 5 req/s
+            return 1.0 / 10  # 100ms for 10 req/s
+        return 1.0 / 10  # Default to conservative 100ms
 
 def fetch_ohlcv_data(args):
     symbol, tf, exchange_config = args
@@ -76,6 +222,11 @@ class EnhancedSuperTrend:
         """Initialize the Enhanced SuperTrend strategy"""
         self.config = self.load_config(config_file)
         print(f"\nLoaded config: {json.dumps(self.config, indent=2)}\n")
+        
+        # Initialize Bitget rate limiter
+        self.rate_limiter = BitgetRateLimiter()
+        logger.info("✅ Bitget rate limiter initialized")
+        
         self.exchange = self.setup_exchange()
 
         # --- TOP 20 COINS DYNAMIC SELECTION ---
@@ -100,16 +251,17 @@ class EnhancedSuperTrend:
             symbols = [c['symbol'].replace(':USDT', '/USDT').replace('USDT/USDT', 'USDT') for c in top_coins]
             print(f"{HEADER_BG}{HEADER_FG}{BOLD}Using TOP 20 COINS by volume (Bitget USDT-margined swaps):{RESET}")
             print(symbols)
-        except Exception as e:
+            except Exception as e:
             print(f"{SELL_FG}{BOLD}Could not fetch top 20 coins dynamically, falling back to hardcoded list. Reason: {e}{RESET}")
             # Fallback: Hardcoded top 20 by market cap (as of 2024)
             symbols = [
-                "BTC/USDT", "ETH/USDT", "BNB/USDT", "SOL/USDT", "XRP/USDT", "ADA/USDT", "DOGE/USDT", "AVAX/USDT", "TRX/USDT", "LINK/USDT",
-                "MATIC/USDT", "DOT/USDT", "LTC/USDT", "BCH/USDT", "SHIB/USDT", "UNI/USDT", "ICP/USDT", "NEAR/USDT", "FIL/USDT", "ETC/USDT"
+                "BTC/USDT:USDT", "ETH/USDT:USDT", "BNB/USDT:USDT", "SOL/USDT:USDT", "XRP/USDT:USDT", "ADA/USDT:USDT", "DOGE/USDT:USDT", "AVAX/USDT:USDT", "TRX/USDT:USDT", "LINK/USDT:USDT",
+                "MATIC/USDT:USDT", "DOT/USDT:USDT", "LTC/USDT:USDT", "BCH/USDT:USDT", "SHIB/USDT:USDT", "UNI/USDT:USDT", "ICP/USDT:USDT", "NEAR/USDT:USDT", "FIL/USDT:USDT", "ETC/USDT:USDT"
             ]
             print(f"{HEADER_BG}{HEADER_FG}{BOLD}Using fallback TOP 20 COINS (hardcoded):{RESET}")
             print(symbols)
-        self.config['symbols'] = symbols
+        
+            self.config['symbols'] = symbols
         # --- END TOP 20 COINS SELECTION ---
 
         self.active_trades = {}
@@ -129,55 +281,9 @@ class EnhancedSuperTrend:
             }
         }
         
-        # Updated Bitget rate limits
-        self.rate_limits = {
-            'rest': {
-                'requests_per_second': 20,  # Bitget REST API limit
-                'requests_per_minute': 1200,
-                'requests_per_hour': 50000,
-                'endpoints': {
-                    'public': {
-                        'time': '20c/1s',
-                        'currencies': '20c/1s',
-                        'products': '20c/1s',
-                        'ticker': '20c/1s',
-                        'tickers': '20c/1s',
-                        'fills': '20c/1s',
-                        'candles': '20c/1s',
-                        'depth': '20c/1s'
-                    },
-                    'private': {
-                        'assets': '10c/1s',
-                        'bills': '10c/1s',
-                        'transferRecords': '20c/1s',
-                        'orders': '10c/1s',
-                        'batch-orders': '5c/1s',
-                        'cancel-order': '10c/1s',
-                        'cancel-batch-orders': '10c/1s',
-                        'orderInfo': '20c/1s',
-                        'open-orders': '20c/1s',
-                        'history': '20c/1s',
-                        'fills': '20c/1s'
-                    }
-                }
-            },
-            'websocket': {
-                'connections': 5,
-                'subscriptions_per_connection': 100,
-                'ping_interval': 20,  # seconds
-                'pong_timeout': 10    # seconds
-            }
-        }
-        
-        # Add rate limit decorators
-        self._fetch_ohlcv_with_retry = sleep_and_retry(
-            limits(calls=20, period=1)(self._fetch_ohlcv_with_retry)
-        )
-        
         # Initialize rate limit tracking
         self.request_timestamps = []
         self.last_request_time = 0
-        self.rate_limit_hits = 0
         
     def load_config(self, config_file):
         """Load configuration from JSON file"""
@@ -196,7 +302,7 @@ class EnhancedSuperTrend:
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
             raise
-
+        
     def setup_exchange(self):
         """Initialize exchange connection with testnet"""
         try:
@@ -213,7 +319,7 @@ class EnhancedSuperTrend:
                     'testnet': True,  # Force testnet mode
                 }
             })
-            exchange.set_sandbox_mode(True)
+                exchange.set_sandbox_mode(True)
             logger.info(f"🔵 Connected to {exchange_id} TESTNET (sandbox mode enabled)")
 
             # Verify testnet connection
@@ -309,22 +415,63 @@ class EnhancedSuperTrend:
             return df['rsi_buy_signal'], df['rsi_sell_signal']
         return pd.Series([True] * len(df), index=df.index), pd.Series([True] * len(df), index=df.index)
     
-    def get_ohlcv_data(self, symbol, timeframe):
-        """Fetch OHLCV data from exchange"""
-        try:
+    async def get_ohlcv_data(self, symbol, timeframe):
+        """Fetch OHLCV data from exchange with rate limiting"""
+        max_retries = 3
+        retry_count = 0
+        
+        while retry_count < max_retries:
+            try:
+                # Acquire rate limit for candles endpoint
+                if not await self.rate_limiter.acquire_public('candles'):
+                    rate_limit_logger.warning(f"Failed to acquire rate limit for candles: {symbol}")
+                    await asyncio.sleep(1)
+                    continue
+                
             print(f"Requesting OHLCV for {symbol} {timeframe}...")
+                start_time = time.time()
             ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, limit=200)
+                response_time = time.time() - start_time
+                
+                # Record successful API request
+                record_api_request('candles', 'public', True, None, response_time)
+                
+                # Reset rate limit tracking on success
+                self.rate_limiter.reset_rate_limit_tracking()
+                
             if not ohlcv or len(ohlcv) == 0:
                 print(f"[ERROR] No OHLCV data returned for {symbol} {timeframe}!")
                 return None
+                    
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             print(f"First rows for {symbol} {timeframe}:\n{df.head()}\n")
             return df
+                
         except Exception as e:
+                error_str = str(e)
+                
+                # Check for Bitget rate limit error codes
+                if '429' in error_str or '30007' in error_str or '30001' in error_str:
+                    backoff_time = self.rate_limiter.handle_rate_limit_error(error_str, 'candles', retry_count)
+                    
+                    # Record rate limit error
+                    record_api_request('candles', 'public', False, error_str, 0.0, retry_count, backoff_time)
+                    
+                    rate_limit_logger.error(
+                        f"Rate limit error fetching {symbol} {timeframe}: {error_str}. "
+                        f"Backing off for {backoff_time:.2f}s"
+                    )
+                    await asyncio.sleep(backoff_time)
+                    retry_count += 1
+                    continue
+                
             print(f"[ERROR] Exception fetching data for {symbol} {timeframe}: {e}")
             logger.error(f"Error fetching data for {symbol}: {e}")
+                return None
+        
+        logger.error(f"Failed to fetch OHLCV data for {symbol} after {max_retries} retries")
             return None
     
     def calculate_position_size(self, symbol, entry_price):
@@ -339,14 +486,27 @@ class EnhancedSuperTrend:
             logger.error(f"Error calculating position size: {e}")
             return 0.0
     
-    def place_order(self, symbol, side, amount, price=None):
-        """Place order on exchange with robust testnet logic (Bitget testnet market buy fix, NoneType fix)"""
+    async def place_order(self, symbol, side, amount, price=None):
+        """Place order on exchange with robust testnet logic and Bitget rate limiting"""
         max_retries = 3
         attempt = 0
         last_error = None
         order = None
+        
         while attempt < max_retries:
             try:
+                # Acquire rate limit for ticker endpoint first
+                if not await self.rate_limiter.acquire_public('ticker'):
+                    rate_limit_logger.warning(f"Failed to acquire rate limit for ticker: {symbol}")
+                    await asyncio.sleep(1)
+                    continue
+                
+                # Acquire rate limit for orders endpoint
+                if not await self.rate_limiter.acquire_private('orders'):
+                    rate_limit_logger.warning(f"Failed to acquire rate limit for orders: {symbol}")
+                    await asyncio.sleep(1)
+                    continue
+                
                 order_type = 'market' if attempt == 0 else 'limit'
                 params = {
                     'testnet': True,
@@ -354,8 +514,15 @@ class EnhancedSuperTrend:
                     'marginMode': 'cross',
                     'positionSide': 'long' if side == 'buy' else 'short',
                 }
+                
                 # Always fetch latest ticker and mark price
+                start_time = time.time()
                 ticker = self.exchange.fetch_ticker(symbol)
+                response_time = time.time() - start_time
+                
+                # Record ticker API request
+                record_api_request('ticker', 'public', True, None, response_time)
+                
                 mark_price = ticker.get('markPrice', ticker.get('last'))
                 if mark_price is None:
                     raise ValueError(f"Could not fetch mark/last price for {symbol}")
@@ -364,57 +531,103 @@ class EnhancedSuperTrend:
                     price = mark_price * offset
                 if amount is None:
                     amount = self.calculate_position_size(symbol, price)
+                
                 logger.info(f"Attempt {attempt+1}: Placing {order_type} order for {side} {amount} {symbol} @ {price}")
-                if order_type == 'market' and side == 'buy':
-                    params['createMarketBuyOrderRequiresPrice'] = False
-                    cost = amount * price
-                    logger.info(f"Market buy: amount={amount}, price={price}, cost={cost}")
+                
+                start_time = time.time()
+                if order_type == 'market':
+                    # For Bitget, market orders need amount not cost
+                    logger.info(f"Market {side}: amount={amount}, price={price}")
                     order = self.exchange.create_order(
-                        symbol, order_type, side, None, None, {**params, 'cost': cost}
+                        symbol, order_type, side, amount, None, params
                     )
                 else:
-                    order = self.exchange.create_order(
-                        symbol, order_type, side, amount, price if order_type == 'limit' else None, params
-                    )
+            order = self.exchange.create_order(
+                symbol, order_type, side, amount, price, params
+            )
+            
+                order_response_time = time.time() - start_time
+                
+                # Record successful order placement
+                record_api_request('orders', 'private', True, None, order_response_time)
+                
+                # Reset rate limit tracking on success
+                self.rate_limiter.reset_rate_limit_tracking()
+                
                 if order and order.get('id'):
                     logger.info(f"💫 TESTNET Order placed: {side} {amount} {symbol} @ {price} (order: {order})")
-                    self.update_dashboard({
-                        'type': 'order',
-                        'data': {
-                            'symbol': symbol,
-                            'side': side,
-                            'amount': amount,
-                            'price': price,
-                            'status': 'filled',
-                            'timestamp': datetime.now().isoformat()
-                        }
-                    })
-                    return order
-            except Exception as e:
+                    rate_limit_logger.info(f"Successful order placement: {symbol} {side} {amount}")
+            self.update_dashboard({
+                'type': 'order',
+                'data': {
+                    'symbol': symbol,
+                    'side': side,
+                    'amount': amount,
+                    'price': price,
+                    'status': 'filled',
+                    'timestamp': datetime.now().isoformat()
+                }
+            })
+            return order
+            
+        except Exception as e:
                 last_error = str(e)
-                logger.error(f"❌ Error placing order (attempt {attempt+1}): {e}")
-                if '50067' not in str(e):
+                error_str = str(e)
+                
+                # Check for Bitget rate limit error codes
+                if '429' in error_str or '30007' in error_str or '30001' in error_str:
+                    backoff_time = self.rate_limiter.handle_rate_limit_error(error_str, 'orders', attempt)
+                    
+                    # Record rate limit error for orders
+                    record_api_request('orders', 'private', False, error_str, 0.0, attempt, backoff_time)
+                    
+                    rate_limit_logger.error(
+                        f"Rate limit error placing order {symbol} {side}: {error_str}. "
+                        f"Backing off for {backoff_time:.2f}s"
+                    )
+                    await asyncio.sleep(backoff_time)
+                    attempt += 1
+                    continue
+                
+                # Check for Bitget order error codes
+                elif '50067' in error_str:
+                    # Price deviation error - adjust price and retry
+                    logger.warning(f"Price deviation error for {symbol}, adjusting price...")
+                    attempt += 1
+                    await asyncio.sleep(1)
+                    continue
+                elif '50001' in error_str:
+                    # Insufficient balance
+                    logger.error(f"Insufficient balance for {symbol} {side} {amount}")
                     break
-                attempt += 1
-                time.sleep(1)
+                elif '50002' in error_str or '50003' in error_str:
+                    # Order size issues
+                    logger.error(f"Order size issue for {symbol}: {error_str}")
+                    break
+                else:
+                    logger.error(f"❌ Error placing order (attempt {attempt+1}): {e}")
+                    break
+                    
         logger.error(f"❌ All attempts to place order failed: {last_error}")
-        self.update_dashboard({
-            'type': 'error',
-            'data': {
+        rate_limit_logger.error(f"Failed order placement after {max_retries} attempts: {symbol} {side} - {last_error}")
+        
+            self.update_dashboard({
+                'type': 'error',
+                'data': {
                 'message': f"Error placing order after {max_retries} attempts: {last_error}",
-                'symbol': symbol,
-                'side': side,
-                'timestamp': datetime.now().isoformat()
-            }
-        })
-        return None
+                    'symbol': symbol,
+                    'side': side,
+                    'timestamp': datetime.now().isoformat()
+                }
+            })
+            return None
     
-    def analyze_symbol(self, symbol, timeframe=None):
-        """Analyze a symbol for SuperTrend signals"""
+    async def analyze_symbol(self, symbol, timeframe=None):
+        """Analyze a symbol for SuperTrend signals with rate limiting"""
         timeframe = timeframe or self.config['timeframes'][0]
         
-        # Fetch data
-        df = self.get_ohlcv_data(symbol, timeframe)
+        # Fetch data with rate limiting
+        df = await self.get_ohlcv_data(symbol, timeframe)
         if df is None or len(df) < 50:
             logger.warning(f"Not enough data for {symbol}")
             return None
@@ -445,11 +658,12 @@ class EnhancedSuperTrend:
             }
             logger.info(f"BUY Signal: {symbol} @ {current['close']} (SuperTrend: {current['supertrend']:.2f}, RSI: {current['rsi']:.2f})")
         
-            # Execute buy order
+            # Execute buy order with rate limiting
             amount = self.calculate_position_size(symbol, current['close'])
-            order = self.place_order(symbol, 'buy', amount, current['close'])
+            order = await self.place_order(symbol, 'buy', amount, current['close'])
             if order:
                 logger.info(f"BUY Order executed: {order}")
+                rate_limit_logger.info(f"BUY Order executed for {symbol} at {current['close']}")
         
         elif previous['in_uptrend'] and not current['in_uptrend'] and rsi_sell_signal.loc[df.index[-1]]:
             signal = {
@@ -463,11 +677,12 @@ class EnhancedSuperTrend:
             }
             logger.info(f"SELL Signal: {symbol} @ {current['close']} (SuperTrend: {current['supertrend']:.2f}, RSI: {current['rsi']:.2f})")
             
-            # Execute sell order
+            # Execute sell order with rate limiting
             amount = self.calculate_position_size(symbol, current['close'])
-            order = self.place_order(symbol, 'sell', amount, current['close'])
+            order = await self.place_order(symbol, 'sell', amount, current['close'])
             if order:
                 logger.info(f"SELL Order executed: {order}")
+                rate_limit_logger.info(f"SELL Order executed for {symbol} at {current['close']}")
         
         # Update dashboard with signal
         if signal:
@@ -698,8 +913,8 @@ class EnhancedSuperTrend:
                     current_time = time.time()
                     if self.request_timestamps:
                         time_since_last = current_time - self.last_request_time
-                        if time_since_last < (1.0 / self.rate_limits['rest']['requests_per_second']):
-                            time.sleep((1.0 / self.rate_limits['rest']['requests_per_second']) - time_since_last)
+                        if time_since_last < (1.0 / self.rate_limiter.get_suggested_wait_time('ticker')):
+                            time.sleep((1.0 / self.rate_limiter.get_suggested_wait_time('ticker')) - time_since_last)
                     
                     # Create new exchange instance for each task
                     exchange_config = self.config['testnet']
@@ -716,13 +931,13 @@ class EnhancedSuperTrend:
                             results[key] = data
                     except Exception as e:
                         logger.error(f"Error in batch fetch: {e}")
-                        self.rate_limit_hits += 1
+                        self.rate_limiter.handle_rate_limit_error(e, 'ticker')
                         
                         # If we hit too many rate limits, pause and reset
-                        if self.rate_limit_hits >= 5:
+                        if self.rate_limiter.rate_limit_hits >= 5:
                             logger.warning("Too many rate limit hits, pausing for 60 seconds...")
                             time.sleep(60)
-                            self.rate_limit_hits = 0
+                            self.rate_limiter.reset_rate_limit_tracking()
         
         return results
 
@@ -797,7 +1012,7 @@ class EnhancedSuperTrend:
                 'st': bool(last['in_uptrend']) if buy else not last['in_uptrend'] if sell else False
             }
             results[method] = {
-                'symbol': symbol,
+                                'symbol': symbol,
                 'timeframe': tf,
                 'signal': signal,
                 'price': last['close'],
@@ -870,34 +1085,55 @@ class EnhancedSuperTrend:
                 return
             
             # Continue with normal strategy execution
-            methods = ['strict', 'moderate', 'loose']
-            timeframes = self.config.get('timeframes', [self.config.get('timeframe', '1m')])
-            symbols = self.config['symbols']
+        methods = ['strict', 'moderate', 'loose']
+        timeframes = self.config.get('timeframes', [self.config.get('timeframe', '1m')])
+        symbols = self.config['symbols']
             
             logger.info(f"🚀 Starting strategy with {len(symbols)} symbols")
             
+            iteration_count = 0
             while True:  # Main trading loop
                 try:
-                    # Fetch and analyze data
-                    tasks = list(itertools.product(symbols, timeframes))
-                    ohlcv_data = self.batch_fetch_ohlcv(tasks)
+                    iteration_count += 1
+                    logger.info(f"🔄 Starting iteration {iteration_count}")
                     
-                    # Process signals
+                    # Show rate limit status every 10 iterations
+                    if iteration_count % 10 == 1:
+                        self.print_rate_limit_status()
+                        if iteration_count > 1:
+                            self.generate_and_log_rate_report(hours=1)
+                    
+                    # Fetch and analyze data
+        tasks = list(itertools.product(symbols, timeframes))
+        ohlcv_data = self.batch_fetch_ohlcv(tasks)
+                    
+                    # Process signals with rate limiting
                     for symbol in symbols:
                         for tf in timeframes:
                             key = (symbol, tf)
                             if key in ohlcv_data and ohlcv_data[key] is not None:
-                                signal = self.analyze_symbol(symbol, tf)
+                                signal = await self.analyze_symbol(symbol, tf)
                                 if signal:
                                     logger.info(f"Signal for {symbol}: {signal}")
-                
+                                    rate_limit_logger.info(f"Signal processed for {symbol}: {signal.get('signal', {}).get('type', 'no signal')}")
+                            
+                            # Add small delay between symbols to respect rate limits
+                            await asyncio.sleep(0.1)
+                    
+                    # Quick rate limit status check every iteration
+                    if iteration_count % 5 == 0:
+                        status = get_rate_status()
+                        if 'alerts' in status and status['alerts'].get('active_rate_limits', 0) > 0:
+                            print(f"{SELL_FG}{BOLD}⚠️ Rate limit alerts detected! Iteration {iteration_count}{RESET}")
+                    
                     # Wait before next iteration
+                    logger.info(f"✅ Iteration {iteration_count} completed. Waiting 60 seconds...")
                     await asyncio.sleep(60)  # 1 minute delay
-                
+                    
                 except Exception as e:
                     logger.error(f"❌ Error in strategy loop: {e}")
                     await asyncio.sleep(5)  # Wait before retry
-                
+            
         except Exception as e:
             logger.error(f"❌ Strategy execution failed: {e}")
             raise
@@ -905,7 +1141,7 @@ class EnhancedSuperTrend:
     async def setup_websocket_connections(self):
         """Setup optimized WebSocket connections for real-time data"""
         symbols = self.config['symbols']
-        max_subscriptions = self.rate_limits['websocket']['subscriptions_per_connection']
+        max_subscriptions = self.rate_limiter.max_subscriptions_per_connection
         
         # Split symbols into chunks for multiple connections
         symbol_chunks = [symbols[i:i + max_subscriptions] 
@@ -937,7 +1173,7 @@ class EnhancedSuperTrend:
         while True:
             try:
                 await ws.send(json.dumps({"op": "ping"}))
-                await asyncio.sleep(self.rate_limits['websocket']['ping_interval'])
+                await asyncio.sleep(self.rate_limiter.get_suggested_wait_time('ticker'))
             except Exception as e:
                 logger.error(f"WebSocket ping error: {e}")
                 # Attempt reconnection
@@ -1028,33 +1264,136 @@ class EnhancedSuperTrend:
                 metrics['error_rate'] += 1
 
     async def test_trade(self):
-        """Place a test trade on testnet"""
+        """Place a test trade on testnet with rate limiting"""
         try:
             symbol = self.config['symbols'][0]  # Use first symbol
-            amount = 0.001  # Small test amount
+            amount = 0.01  # Minimum test amount for Bitget
+            
+            # Acquire rate limit for ticker
+            if not await self.rate_limiter.acquire_public('ticker'):
+                logger.error("Failed to acquire rate limit for ticker in test trade")
+                return False
             
             # Get current price
             ticker = self.exchange.fetch_ticker(symbol)
             price = ticker['last']
             
+            logger.info(f"🧪 Starting test trade for {symbol} at {price}")
+            rate_limit_logger.info(f"Test trade initiated for {symbol}")
+            
             # Place test buy order
-            order = self.place_order(symbol, 'buy', amount, price)
+            order = await self.place_order(symbol, 'buy', amount, price)
             if order:
                 logger.info(f"✅ Test buy order placed: {order}")
+                rate_limit_logger.info(f"Test buy order successful: {order.get('id', 'unknown')}")
                 
                 # Wait 5 seconds
                 await asyncio.sleep(5)
                 
                 # Place test sell order
-                sell_order = self.place_order(symbol, 'sell', amount, price)
+                sell_order = await self.place_order(symbol, 'sell', amount, price)
                 if sell_order:
                     logger.info(f"✅ Test sell order placed: {sell_order}")
+                    rate_limit_logger.info(f"Test sell order successful: {sell_order.get('id', 'unknown')}")
+                    logger.info(f"🎉 Test trade completed successfully!")
                     return True
                 
             return False
         except Exception as e:
             logger.error(f"❌ Test trade failed: {e}")
+            rate_limit_logger.error(f"Test trade failed: {str(e)}")
             return False
+
+    def print_rate_limit_status(self):
+        """Print comprehensive rate limiting status"""
+        try:
+            status = get_rate_status()
+            
+            print(f"\n{HEADER_BG}{HEADER_FG}{BOLD}{'='*80}{RESET}")
+            print(f"{HEADER_FG}{BOLD}{'🚦 BITGET API RATE LIMIT STATUS':^80}{RESET}")
+            print(f"{HEADER_BG}{HEADER_FG}{BOLD}{'='*80}{RESET}")
+            
+            # Rate limit windows
+            if 'windows' in status:
+                print(f"\n{BUY_FG}{BOLD}📊 Current API Usage:{RESET}")
+                for window_type, data in status['windows'].items():
+                    limit = data.get('limit', 10)
+                    current = data.get('requests_last_second', 0)
+                    utilization = data.get('utilization', 0) * 100
+                    
+                    color = BUY_FG if utilization < 60 else (ACCENT if utilization < 80 else SELL_FG)
+                    status_emoji = "🟢" if utilization < 60 else ("🟡" if utilization < 80 else "🔴")
+                    
+                    print(f"  {status_emoji} {window_type.title():<10} {current:>2}/{limit} req/s ({color}{utilization:>5.1f}%{RESET})")
+            
+            # Top endpoints
+            if 'top_endpoints' in status and status['top_endpoints']:
+                print(f"\n{BUY_FG}{BOLD}🔥 Most Active Endpoints:{RESET}")
+                for i, endpoint in enumerate(status['top_endpoints'][:5], 1):
+                    compliance = endpoint.get('compliance_score', 100)
+                    success_rate = endpoint.get('success_rate', 100)
+                    rps = endpoint.get('requests_per_second', 0)
+                    
+                    compliance_color = BUY_FG if compliance >= 90 else (ACCENT if compliance >= 80 else SELL_FG)
+                    success_color = BUY_FG if success_rate >= 95 else (ACCENT if success_rate >= 90 else SELL_FG)
+                    
+                    print(f"  {i}. {endpoint['endpoint']:<15} "
+                          f"RPS: {rps:>4.1f} | "
+                          f"Success: {success_color}{success_rate:>5.1f}%{RESET} | "
+                          f"Compliance: {compliance_color}{compliance:>5.1f}%{RESET}")
+            
+            # Alerts
+            if 'alerts' in status:
+                alerts = status['alerts']
+                active_limits = alerts.get('active_rate_limits', 0)
+                low_compliance = alerts.get('low_compliance_endpoints', [])
+                
+                if active_limits > 0 or low_compliance:
+                    print(f"\n{SELL_FG}{BOLD}🚨 ACTIVE ALERTS:{RESET}")
+                    
+                    if active_limits > 0:
+                        print(f"  🔴 Rate limit hits in last minute: {active_limits}")
+                    
+                    for endpoint_alert in low_compliance[:3]:
+                        print(f"  ⚠️  Low compliance: {endpoint_alert['endpoint']} ({endpoint_alert['score']:.1f}%)")
+            else:
+                    print(f"\n{BUY_FG}{BOLD}✅ No active alerts - All systems operating normally{RESET}")
+            
+            # Rate limiter internal status
+            print(f"\n{BUY_FG}{BOLD}⚙️ Rate Limiter Status:{RESET}")
+            print(f"  🔄 Total rate limit hits: {self.rate_limiter.rate_limit_hits}")
+            print(f"  ⏰ Last rate limit: {datetime.fromtimestamp(self.rate_limiter.last_rate_limit_time).strftime('%H:%M:%S') if self.rate_limiter.last_rate_limit_time > 0 else 'Never'}")
+            print(f"  🔁 Consecutive rate limits: {self.rate_limiter.consecutive_rate_limits}")
+            
+            print(f"{HEADER_BG}{HEADER_FG}{BOLD}{'='*80}{RESET}\n")
+            
+        except Exception as e:
+            logger.error(f"Error printing rate limit status: {e}")
+            print(f"{SELL_FG}{BOLD}❌ Could not retrieve rate limit status: {e}{RESET}")
+
+    def generate_and_log_rate_report(self, hours: int = 1):
+        """Generate and log a rate limiting report"""
+        try:
+            report = generate_rate_report(hours)
+            
+            # Log to file
+            with open('bitget_rate_report.txt', 'w') as f:
+                f.write(report)
+            
+            logger.info(f"📊 Rate limit report generated for last {hours} hour(s)")
+            
+            # Print summary
+            lines = report.split('\n')
+            summary_lines = [line for line in lines if 'Total Requests:' in line or 'Rate Limit Hits:' in line or 'Success Rate:' in line]
+            
+            if summary_lines:
+                print(f"\n{HEADER_FG}{BOLD}📈 Rate Limit Report Summary (Last {hours}h):{RESET}")
+                for line in summary_lines[:3]:
+                    print(f"  {line.strip()}")
+                print(f"  📄 Full report saved to: bitget_rate_report.txt\n")
+                
+        except Exception as e:
+            logger.error(f"Error generating rate report: {e}")
 
 class CodeChangeHandler(FileSystemEventHandler):
     def __init__(self, strategy):
@@ -1118,7 +1457,7 @@ def tail_log_files(n=30):
                 lines = f.readlines()
                 if not lines:
                     print(f"⚠️ {log_file} is empty")
-                    continue
+                continue
                     
                 # Show last n lines
                 for line in lines[-n:]:
@@ -1230,3 +1569,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+ 

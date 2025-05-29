@@ -1,5 +1,5 @@
 {
-    "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+    "symbols": ["BTC/USDT:USDT", "ETH/USDT:USDT", "SOL/USDT:USDT"],
     "timeframes": ["1m", "5m", "15m"],
     "days": 90,
     "st_length": 10,
@@ -23,7 +23,7 @@
         "take_profit_percent": 4.0
     },
     "execution": {
-        "live_trading": false,
+        "live_trading": true,
         "paper_trading": false,
         "trade_mode": "testnet",
         "max_open_trades": 3,
