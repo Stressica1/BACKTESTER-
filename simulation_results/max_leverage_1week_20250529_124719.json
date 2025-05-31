@@ -1,0 +1,96 @@
+{
+  "simulation_config": {
+    "starting_balance": 20.0,
+    "simulation_days": 7,
+    "max_leverage": 50,
+    "position_size": 0.5,
+    "trading_pairs": 230,
+    "target_win_rate": 85.0
+  },
+  "performance_metrics": {
+    "starting_balance": 20.0,
+    "ending_balance": 20.0,
+    "total_pnl": 0.0,
+    "total_return_pct": 0.0,
+    "total_trades": 0,
+    "winning_trades": 0,
+    "losing_trades": 0,
+    "win_rate": 0,
+    "max_drawdown": 0.0,
+    "simulation_duration_seconds": 78.29191255569458
+  },
+  "daily_breakdown": [
+    {
+      "day": 1,
+      "start_balance": 20.0,
+      "end_balance": 20.0,
+      "day_pnl": 0.0,
+      "day_trades": 0,
+      "day_winners": 0,
+      "day_win_rate": 0,
+      "total_win_rate": 0
+    },
+    {
+      "day": 2,
+      "start_balance": 20.0,
+      "end_balance": 20.0,
+      "day_pnl": 0.0,
+      "day_trades": 0,
+      "day_winners": 0,
+      "day_win_rate": 0,
+      "total_win_rate": 0
+    },
+    {
+      "day": 3,
+      "start_balance": 20.0,
+      "end_balance": 20.0,
+      "day_pnl": 0.0,
+      "day_trades": 0,
+      "day_winners": 0,
+      "day_win_rate": 0,
+      "total_win_rate": 0
+    },
+    {
+      "day": 4,
+      "start_balance": 20.0,
+      "end_balance": 20.0,
+      "day_pnl": 0.0,
+      "day_trades": 0,
+      "day_winners": 0,
+      "day_win_rate": 0,
+      "total_win_rate": 0
+    },
+    {
+      "day": 5,
+      "start_balance": 20.0,
+      "end_balance": 20.0,
+      "day_pnl": 0.0,
+      "day_trades": 0,
+      "day_winners": 0,
+      "day_win_rate": 0,
+      "total_win_rate": 0
+    },
+    {
+      "day": 6,
+      "start_balance": 20.0,
+      "end_balance": 20.0,
+      "day_pnl": 0.0,
+      "day_trades": 0,
+      "day_winners": 0,
+      "day_win_rate": 0,
+      "total_win_rate": 0
+    },
+    {
+      "day": 7,
+      "start_balance": 20.0,
+      "end_balance": 20.0,
+      "day_pnl": 0.0,
+      "day_trades": 0,
+      "day_winners": 0,
+      "day_win_rate": 0,
+      "total_win_rate": 0
+    }
+  ],
+  "trade_history": [],
+  "timestamp": "2025-05-29T12:47:19.332179"
+}

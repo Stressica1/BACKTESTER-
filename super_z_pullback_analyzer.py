@@ -157,53 +157,66 @@ class SuperZPullbackAnalyzer:
             signal_price = signal['price']
             signal_type = signal['type']
             
+            # Initialize variables to prevent unbound errors
+            pullback_low_price = signal_price
+            pullback_high_price = signal_price
+            pullback_low_idx = None
+            pullback_high_idx = None
+            pullback_percentage = 0.0
+            recovered = False
+            recovery_time = None
+            
             # Find data after signal
-            signal_idx = df.index.get_loc(signal_time) if signal_time in df.index else -1
-            if signal_idx == -1 or signal_idx >= len(df) - 1:
-                continue
+            try:
+                signal_idx = df.index.get_loc(signal_time) if signal_time in df.index else -1
+                if signal_idx == -1 or signal_idx + lookback_candles > len(df):
+                    continue
+                    
+                # Look ahead for pullback
+                lookback_data = df.iloc[signal_idx:signal_idx + lookback_candles]
                 
-            # Look ahead for pullback
-            lookback_data = df.iloc[signal_idx:signal_idx + lookback_candles]
-            
-            if signal_type == 'long':
-                # For long signals, look for price drop (pullback)
-                pullback_low_price = lookback_data['low'].min()
-                pullback_percentage = (signal_price - pullback_low_price) / signal_price * 100
-                pullback_low_idx = lookback_data['low'].idxmin()
-            else:
-                # For short signals, look for price rise (pullback)
-                pullback_high_price = lookback_data['high'].max()
-                pullback_percentage = (pullback_high_price - signal_price) / signal_price * 100
-                pullback_high_idx = lookback_data['high'].idxmax()
-            
-            # Check if price recovered
-            if signal_type == 'long':
-                recovery_data = lookback_data.loc[pullback_low_idx:]
-                recovered = (recovery_data['close'] > signal_price).any()
-                recovery_time = recovery_data[recovery_data['close'] > signal_price].index[0] if recovered else None
-            else:
-                recovery_data = lookback_data.loc[pullback_high_idx:]
-                recovered = (recovery_data['close'] < signal_price).any()
-                recovery_time = recovery_data[recovery_data['close'] < signal_price].index[0] if recovered else None
-            
-            # Calculate VHMA red duration (simplified)
-            vhma_red_duration = lookback_candles // 2  # Simplified calculation
-            
-            event = PullbackEvent(
-                signal_time=signal_time,
-                signal_type=signal_type,
-                signal_price=signal_price,
-                pullback_start_time=signal_time,
-                pullback_end_time=lookback_data.index[-1],
-                pullback_low_price=pullback_low_price if signal_type == 'long' else signal_price,
-                pullback_high_price=pullback_high_price if signal_type == 'short' else signal_price,
-                pullback_percentage=pullback_percentage,
-                vhma_red_duration=vhma_red_duration,
-                recovered=recovered,
-                recovery_time=recovery_time
-            )
-            
-            pullback_events.append(event)
+                if signal_type == 'long':
+                    # For long signals, look for price drop (pullback)
+                    pullback_low_price = lookback_data['low'].min()
+                    pullback_percentage = (signal_price - pullback_low_price) / signal_price * 100
+                    pullback_low_idx = lookback_data['low'].idxmin()
+                else:
+                    # For short signals, look for price rise (pullback)
+                    pullback_high_price = lookback_data['high'].max()
+                    pullback_percentage = (pullback_high_price - signal_price) / signal_price * 100
+                    pullback_high_idx = lookback_data['high'].idxmax()
+                
+                # Check if price recovered
+                if signal_type == 'long' and pullback_low_idx is not None:
+                    recovery_data = lookback_data.loc[pullback_low_idx:]
+                    recovered = (recovery_data['close'] > signal_price).any()
+                    recovery_time = recovery_data[recovery_data['close'] > signal_price].index[0] if recovered and len(recovery_data[recovery_data['close'] > signal_price]) > 0 else None
+                elif signal_type == 'short' and pullback_high_idx is not None:
+                    recovery_data = lookback_data.loc[pullback_high_idx:]
+                    recovered = (recovery_data['close'] < signal_price).any()
+                    recovery_time = recovery_data[recovery_data['close'] < signal_price].index[0] if recovered and len(recovery_data[recovery_data['close'] < signal_price]) > 0 else None
+                
+                # Calculate VHMA red duration (simplified)
+                vhma_red_duration = lookback_candles // 2  # Simplified calculation
+                
+                event = PullbackEvent(
+                    signal_time=signal_time,
+                    signal_type=signal_type,
+                    signal_price=signal_price,
+                    pullback_start_time=signal_time,
+                    pullback_end_time=lookback_data.index[-1] if len(lookback_data) > 0 else signal_time,
+                    pullback_low_price=pullback_low_price,
+                    pullback_high_price=pullback_high_price,
+                    pullback_percentage=pullback_percentage,
+                    vhma_red_duration=vhma_red_duration,
+                    recovered=recovered,
+                    recovery_time=recovery_time
+                )
+                
+                pullback_events.append(event)
+            except Exception as e:
+                logging.error(f"Error analyzing pullback for signal at {signal_time}: {e}")
+                continue
         
         return pullback_events
     
@@ -263,22 +276,28 @@ class SuperZPullbackAnalyzer:
         
         return supertrend, trend
     
-    def detect_signals(self, df, timeframe='5m', loosen_level=None):
+    def detect_signals(self, df, timeframe='5m', **kwargs):
         """
         🚀 ULTIMATE CONSOLIDATED SIGNAL DETECTION with 100 REFINEMENTS 🚀
         Single optimized scan mode - NO MORE STRICT/MODERATE/LOOSE MODES
         All advanced features integrated into ONE supreme algorithm
         
         Args:
-            loosen_level: DEPRECATED - kept for backwards compatibility only
+            df: DataFrame with OHLCV data
+            timeframe: The timeframe of the data ('5m', '15m', etc.)
+            **kwargs: Additional parameters (supports backward compatibility)
         """
-        # Ignore loosen_level parameter - it's deprecated but kept for compatibility
-        if loosen_level is not None:
-            import traceback
-            logging.warning(f"⚠️ loosen_level parameter is deprecated and ignored: {loosen_level}")
-            logging.warning(f"⚠️ Called from: {traceback.format_stack()[-2].strip()}")
+        # Handle deprecated loosen_level parameter
+        if 'loosen_level' in kwargs:
+            try:
+                import traceback
+                logging.warning(f"⚠️ loosen_level parameter is deprecated and ignored: {kwargs['loosen_level']}")
+                logging.warning(f"⚠️ Called from: {traceback.format_stack()[-2].strip()}")
+            except:
+                pass  # Ensure we don't fail on logging
+            
         signals = []
-        if len(df) < 50:
+        if df is None or len(df) < 50:
             return signals, df
             
         # Apply base indicators
@@ -1414,34 +1433,60 @@ class SuperZPullbackAnalyzer:
             try:
                 # Get only last 50 candles for speed
                 df = await self.fetch_data(symbol, timeframe, days=1)  # Only 1 day for speed
-                if df.empty or len(df) < 20:
+                if df is None or df.empty or len(df) < 20:
                     return None
                     
                 df = df.tail(50)  # Only last 50 candles for SPEED
-                signals, df_with_indicators = self.detect_signals(df, timeframe=timeframe)
+                
+                # First try normal detect_signals without the deprecated parameter
+                try:
+                    signals, df_with_indicators = self.detect_signals(df, timeframe=timeframe)
+                except TypeError as te:
+                    logging.error(f"TypeError in detect_signals for {symbol}: {str(te)}")
+                    # Try with minimal parameters as fallback
+                    try:
+                        signals, df_with_indicators = self.detect_signals(df)
+                    except Exception as inner_error:
+                        logging.error(f"Failed fallback for {symbol}: {str(inner_error)}")
+                        return None
+                except Exception as e:
+                    logging.error(f"Error in detect_signals for {symbol}: {str(e)}")
+                    return None
+                
                 if not signals:
                     return None
                     
                 latest_signal = signals[-1]
                 
                 # Quick scoring - skip heavy analysis for speed
-                score, breakdown, datapoints, normalized = self.enhanced_score_all_data(symbol, df_with_indicators, latest_signal)
-                
-                if score >= SCORE_THRESHOLD and latest_signal['time'] == df_with_indicators.index[-1]:
-                    logging.info(f"🔥 HIGH SCORE SIGNAL: {symbol} | Score: {score} | Type: {latest_signal['type']}")
-                    trigger_price = latest_signal['price']
-                    side = 'buy' if latest_signal['type'] == 'long' else 'sell'
+                try:
+                    score, breakdown, datapoints, normalized = self.enhanced_score_all_data(symbol, df_with_indicators, latest_signal)
                     
-                    # PLACE LIVE ORDER WITH REAL MONEY
-                    order = self.place_conditional_order(symbol, side, trigger_price, trigger_price, trigger_price)
-                    if order:
-                        logging.info(f"💰 LIVE ORDER PLACED: {symbol} {side} @ {trigger_price}")
-                        self.simulate_trade_scenarios(trigger_price, side)
-                        return {'symbol': symbol, 'signal': latest_signal, 'score': score, 'order': order}
+                    if score >= SCORE_THRESHOLD and latest_signal['time'] == df_with_indicators.index[-1]:
+                        logging.info(f"🔥 HIGH SCORE SIGNAL: {symbol} | Score: {score} | Type: {latest_signal['type']}")
+                        trigger_price = latest_signal['price']
+                        side = 'buy' if latest_signal['type'] == 'long' else 'sell'
+                        
+                        # PLACE LIVE ORDER WITH REAL MONEY
+                        try:
+                            order = self.place_conditional_order(symbol, side, trigger_price, trigger_price, trigger_price)
+                            if order:
+                                logging.info(f"💰 LIVE ORDER PLACED: {symbol} {side} @ {trigger_price}")
+                                self.simulate_trade_scenarios(trigger_price, side)
+                                return {'symbol': symbol, 'signal': latest_signal, 'score': score, 'order': order}
+                        except Exception as order_error:
+                            logging.error(f"Error placing order for {symbol}: {str(order_error)}")
+                            return None
+                except Exception as scoring_error:
+                    logging.error(f"Error in signal scoring for {symbol}: {str(scoring_error)}")
+                    return None
                         
                 return None
             except Exception as e:
-                logging.error(f"Lightning processing error for {symbol}: {e}")
+                logging.error(f"Live trading error for {symbol}: {str(e)}")
+                # Log full traceback for better debugging
+                import traceback
+                logging.error(f"Detailed error traceback for {symbol}: {traceback.format_exc()}")
                 return None
         
         while True:

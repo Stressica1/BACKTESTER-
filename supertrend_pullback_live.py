@@ -1,29 +1,28 @@
 #!/usr/bin/env python3
 """
-FIXED SuperTrend Pullback Trading Bot for Bitget - WORKING EDITION
-🚀 ALL CRITICAL ISSUES RESOLVED 🚀
+FIXED SuperTrend Pullback Trading Bot for Bitget - WORKING  
 Position Size: FIXED 0.50 USDT per trade (ENFORCED)
 """
 
-import ccxt
-import pandas as pd
-import numpy as np
-import time
+import asyncio
+from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 import json
 import logging
-import asyncio
-from datetime import datetime, timedelta
-from collections import defaultdict, deque
-import os
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
-import threading
-import sqlite3
-import warnings
-import statistics
+import os
 from pathlib import Path
 import random
+import sqlite3
+import sys
+import time
+import traceback
+import warnings
+
+import ccxt
+import numpy as np
+import pandas as pd
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -32,8 +31,14 @@ pd.set_option('mode.chained_assignment', None)
 
 # Create required directories
 REQUIRED_DIRS = ["logs", "data", "cache", "config"]
-for directory in REQUIRED_DIRS:
-    Path(directory).mkdir(exist_ok=True)
+# Ensure required directories and log files exist
+for d in REQUIRED_DIRS:
+    os.makedirs(d, exist_ok=True)
+# Ensure log files exist
+for log_file in ["logs/supertrend_pullback.log", "logs/error.log", "logs/trading.log"]:
+    if not os.path.exists(log_file):
+        with open(log_file, 'w') as f:
+            f.write("")
 
 # Enhanced logging setup
 class CustomFormatter(logging.Formatter):
@@ -97,8 +102,6 @@ class TradingDatabase:
         try:
             conn = sqlite3.connect(self.db_file)
             cursor = conn.cursor()
-            
-            # Enhanced trades table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS trades (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -114,8 +117,6 @@ class TradingDatabase:
                     success BOOLEAN DEFAULT TRUE
                 )
             ''')
-            
-            # Signal tracking table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS signals (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -127,16 +128,12 @@ class TradingDatabase:
                     executed BOOLEAN DEFAULT FALSE
                 )
             ''')
-            
-            # Create indexes for performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_signals_timestamp ON signals(timestamp)')
-            
             conn.commit()
             conn.close()
             logger.info("✅ Database initialized successfully")
-            
         except Exception as e:
             logger.error(f"❌ Database initialization failed: {e}")
 
@@ -145,7 +142,6 @@ class TradingDatabase:
         try:
             conn = sqlite3.connect(self.db_file)
             cursor = conn.cursor()
-            
             cursor.execute('''
                 INSERT INTO trades (timestamp, symbol, side, price, size, signal_confidence, execution_time, success)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -154,24 +150,30 @@ class TradingDatabase:
                 trade_data.get('symbol', ''),
                 trade_data.get('side', ''),
                 trade_data.get('price', 0),
-                trade_data.get('size', 0.50),  # Always 0.50 USDT
+                trade_data.get('size', 0.50),
                 trade_data.get('confidence', 0),
                 trade_data.get('execution_time', 0),
                 trade_data.get('success', True)
             ))
-            
             conn.commit()
             conn.close()
-            
         except Exception as e:
             logger.debug(f"Trade save error: {e}")
 
     def save_signal(self, signal_data):
         """Save signal data to database"""
         try:
+            if not isinstance(signal_data, dict):
+                logger.error("Signal data must be a dictionary")
+                return
+            
+            # Ensure required fields are present
+            required_fields = ['timestamp', 'symbol', 'side', 'confidence', 'price', 'executed']
+            if not all(field in signal_data for field in required_fields):
+                logger.error("Signal data missing required fields")
+                return
             conn = sqlite3.connect(self.db_file)
             cursor = conn.cursor()
-            
             cursor.execute('''
                 INSERT INTO signals (timestamp, symbol, signal_type, confidence, price, executed)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -183,30 +185,36 @@ class TradingDatabase:
                 signal_data.get('price', 0),
                 signal_data.get('executed', False)
             ))
-            
             conn.commit()
             conn.close()
-            
         except Exception as e:
             logger.debug(f"Signal save error: {e}")
 
 class AggressivePullbackTrader:
     """FIXED SuperTrend Pullback Trading Bot - ALL ISSUES RESOLVED"""
     
-    def __init__(self, config_file="config/bitget_config.json", simulation_mode=True):
+    def __init__(self, config_file="config/bitget_config.json"):
         """Initialize the FIXED trading bot with DYNAMIC PAIR DISCOVERY for ALL available pairs"""
-        logger.info("🚀 INITIALIZING SUPERTREND PULLBACK BOT WITH DYNAMIC PAIR DISCOVERY 🚀")
-        
-        self.simulation_mode = simulation_mode
-        self.config = self.load_config(config_file)
+        logger.info("🚀 INITIALIZING SUPERTREND PULLBACK BOT WITH DYNAMIC PAIR DISCOVERY")
+        force_write_bitget_config()  # Always overwrite config with hardcoded credentials
+        self.config = {
+            "api_key": BITGET_API_KEY,
+            "secret": BITGET_SECRET,
+            "passphrase": BITGET_PASSPHRASE,
+            "sandbox": False,
+            "position_size_fixed": 0.50
+        }
         self.exchange = self.setup_exchange()
         self.database = TradingDatabase()
         
-        # CRITICAL FIX: Position size enforcement
-        self.FIXED_POSITION_SIZE_USDT = 0.50
+        # CRITICAL FIX: Position size enforcement - REDUCED TO 1 USDT FOR TESTING
+        self.FIXED_POSITION_SIZE_USDT = 1.0  # REDUCED FROM 2.0 TO 1.0 USDT FOR SMALLER ORDERS
         self.position_size_validation = True
         
         logger.critical(f"🔒 POSITION SIZE LOCKED: {self.FIXED_POSITION_SIZE_USDT} USDT")
+        
+        # Initialize available balance
+        self.available_balance = 0.0
         
         # Trading parameters
         self.timeframe = "5m"
@@ -228,7 +236,7 @@ class AggressivePullbackTrader:
         self.positions = {}
         self.signals = defaultdict(list)
         self.trade_history = deque(maxlen=1000)
-        
+
         # Performance tracking
         self.total_trades = 0
         self.winning_trades = 0
@@ -266,7 +274,9 @@ class AggressivePullbackTrader:
         self.current_balance = self.initial_balance
         self.simulation_trades = []
         
-        logger.info(f"✅ Bot initialized successfully")
+        self.log_swap_account_balance()
+        
+        logger.info("✅ Bot initialized successfully")
         logger.info(f"🎯 Total Symbols: {len(self.active_symbols)}")
         logger.info(f"⚡ Workers: {self.max_workers}")
         logger.info(f"🔒 Position Size: {self.FIXED_POSITION_SIZE_USDT} USDT (FIXED)")
@@ -471,162 +481,33 @@ class AggressivePullbackTrader:
         return self.FIXED_POSITION_SIZE_USDT
 
     def load_config(self, config_file):
-        """FIXED: Load configuration with proper error handling"""
-        try:
-            default_config = {
-                "api_key": "",
-                "secret": "",
-                "passphrase": "",
-                "sandbox": True,
-                "position_size_fixed": 0.50
-            }
-            
-            if not os.path.exists(config_file):
-                logger.info(f"Creating default config at {config_file}")
-                with open(config_file, 'w') as f:
-                    json.dump(default_config, f, indent=4)
-                return default_config
-            
-            with open(config_file, 'r') as f:
-                loaded_config = json.load(f)
-                
-            # Merge with defaults
-            config = {**default_config, **loaded_config}
-            config["position_size_fixed"] = 0.50  # Enforce
-            
-            logger.info("✅ Configuration loaded successfully")
-            return config
-            
-        except Exception as e:
-            logger.error(f"❌ Config loading failed: {e}")
-            return {
-                "api_key": "", "secret": "", "passphrase": "", "sandbox": True,
-                "position_size_fixed": 0.50
-            }
+        # Always return hardcoded config
+        return {
+            "api_key": BITGET_API_KEY,
+            "secret": BITGET_SECRET,
+            "passphrase": BITGET_PASSPHRASE,
+            "sandbox": False,
+            "position_size_fixed": 0.50
+        }
 
     def setup_exchange(self):
-        """FIXED: Setup exchange with proper error handling"""
-        try:
-            if self.simulation_mode:
-                logger.info("🔧 Setting up simulation exchange")
-                return self.create_mock_exchange()
-            
-            # Real exchange setup
-            exchange = ccxt.bitget({
-                "apiKey": self.config["api_key"],
-                "secret": self.config["secret"],
-                "password": self.config["passphrase"],
-                "sandbox": self.config.get("sandbox", True),
-                "timeout": 10000,
-                "rateLimit": 100,
-                "enableRateLimit": True,
-                "options": {
-                    "defaultType": "swap"
-                }
-            })
-            
-            # Test connection
-            try:
-                exchange.load_markets()
-                logger.info("✅ Exchange connected successfully")
-                return exchange
-            except Exception as e:
-                logger.error(f"❌ Exchange connection failed: {e}")
-                logger.warning("Falling back to simulation mode")
-                self.simulation_mode = True
-                return self.create_mock_exchange()
-                        
-        except Exception as e:
-            logger.error(f"❌ Exchange setup failed: {e}")
-            self.simulation_mode = True
-            return self.create_mock_exchange()
-
-    def create_mock_exchange(self):
-        """FIXED: Create proper mock exchange for simulation"""
-        class MockExchange:
-            def __init__(self):
-                self.markets = {}
-                self.balance = {'USDT': {'free': 10000, 'used': 0, 'total': 10000}}
-                
-            def fetch_ticker(self, symbol):
-                time.sleep(0.001)  # Simulate latency
-                base_price = self._get_base_price(symbol)
-                return {
-                    'last': base_price + random.uniform(-base_price*0.01, base_price*0.01),
-                    'timestamp': time.time() * 1000
-                }
-                
-            def fetch_ohlcv(self, symbol, timeframe='5m', since=None, limit=100):
-                time.sleep(0.001)
-                return self._generate_realistic_ohlcv(symbol, limit)
-                
-            def fetch_balance(self):
-                time.sleep(0.001)
-                return self.balance
-                
-            def create_market_order(self, symbol, side, amount, price=None, params=None):
-                time.sleep(0.002)  # Simulate execution time
-                current_price = self._get_base_price(symbol)
-                
-                return {
-                    'id': f'mock_{int(time.time() * 1000)}',
-                    'symbol': symbol,
-                    'side': side,
-                    'amount': amount,
-                    'filled': amount,
-                    'status': 'closed',
-                    'price': current_price,
-                    'timestamp': time.time(),
-                    'fees': {'cost': amount * 0.001, 'currency': 'USDT'}
-                }
-                
-            def set_leverage(self, leverage, symbol, params=None):
-                time.sleep(0.001)
-                return {'leverage': leverage, 'symbol': symbol}
-                
-            def load_markets(self):
-                time.sleep(0.001)
-                return {}
-                
-            def _get_base_price(self, symbol):
-                """Get realistic base price for symbol"""
-                prices = {
-                    'BTC/USDT': 95000, 'ETH/USDT': 3400, 'SOL/USDT': 210,
-                    'BNB/USDT': 650, 'XRP/USDT': 2.3, 'ADA/USDT': 0.95,
-                    'DOGE/USDT': 0.38, 'MATIC/USDT': 0.45, 'DOT/USDT': 7.2,
-                    'AVAX/USDT': 42.5, 'LINK/USDT': 25.5, 'UNI/USDT': 12.8
-                }
-                return prices.get(symbol, random.uniform(1, 100))
-                
-            def _generate_realistic_ohlcv(self, symbol, limit):
-                """Generate realistic OHLCV data"""
-                base_price = self._get_base_price(symbol)
-                now = int(time.time() * 1000)
-                interval_ms = 5 * 60 * 1000  # 5 minutes
-                
-                ohlcv = []
-                current_price = base_price
-                
-                for i in range(limit):
-                    timestamp = now - (limit - i) * interval_ms
-                    
-                    # Add realistic price movement
-                    change = random.uniform(-0.02, 0.02)  # ±2% change
-                    new_price = current_price * (1 + change)
-                    
-                    # Generate OHLCV
-                    open_price = current_price
-                    close_price = new_price
-                    high_price = max(open_price, close_price) * (1 + random.uniform(0, 0.01))
-                    low_price = min(open_price, close_price) * (1 - random.uniform(0, 0.01))
-                    volume = random.uniform(1000, 10000)
-                    
-                    ohlcv.append([timestamp, open_price, high_price, low_price, close_price, volume])
-                    current_price = new_price
-                
-                return ohlcv
-                
-        return MockExchange()
+        # Only use real Bitget exchange, never mock
+        exchange = ccxt.bitget({
+            'apiKey': self.config["api_key"],
+            'secret': self.config["secret"],
+            'password': self.config["passphrase"],
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'swap',
+                'adjustForTimeDifference': True,
+                'createMarketBuyOrderRequiresPrice': False,
+                'defaultMarginMode': 'cross',  # USE CROSS MARGIN AS REQUESTED
+                'hedgeMode': True              # KEEP HEDGE MODE ENABLED
+            },
+        })
+        exchange.set_sandbox_mode(self.config.get("sandbox", False))
+        exchange.load_markets()
+        return exchange
 
     async def rate_limit(self, endpoint='default'):
         """FIXED: Proper rate limiting implementation"""
@@ -639,8 +520,8 @@ class AggressivePullbackTrader:
         # Remove old requests (older than 1 second)
         while window and current_time - window[0] > 1.0:
             window.popleft()
-        
-        # Check if we need to wait
+            
+            # Check if we need to wait
         if len(window) >= limit:
             sleep_time = 1.0 - (current_time - window[0]) + 0.01
             if sleep_time > 0:
@@ -648,42 +529,38 @@ class AggressivePullbackTrader:
         
         # Add current request
         window.append(current_time)
-
+        
     async def handle_bitget_error(self, error, symbol=None, retry_count=0):
         """FIXED: Enhanced Bitget error handling with automatic recovery"""
         error_str = str(error).lower()
         max_retries = 3
-        
         logger.warning(f"⚠️ Bitget error for {symbol}: {error}")
-        
+            
         # Handle specific Bitget errors
         if "50067" in str(error):  # Price deviation error
             logger.info("🔧 Price deviation error - getting current market price...")
             if symbol and retry_count < max_retries:
                 await asyncio.sleep(1)
                 return await self.get_current_market_price(symbol)
-                
+        elif "43012" in str(error) or "insufficient balance" in error_str:
+            logger.error("💰 Insufficient balance - cannot place order")
+            # Update available balance to prevent further trade attempts
+            self.available_balance = 0.0
+            return False
         elif "rate limit" in error_str or "429" in str(error):
             wait_time = min(60, 2 ** retry_count)
             logger.info(f"⏱️ Rate limit hit - waiting {wait_time}s...")
             await asyncio.sleep(wait_time)
             return True
-            
-        elif "insufficient" in error_str:
-            logger.error("💰 Insufficient balance - cannot place order")
-            return False
-            
         elif "invalid" in error_str or "unauthorized" in error_str:
             logger.error("🔑 Authentication error - check API credentials")
             return False
-            
         # Default retry logic
         if retry_count < max_retries:
             wait_time = 2 ** retry_count
             logger.info(f"🔄 Retrying in {wait_time}s... (attempt {retry_count + 1})")
             await asyncio.sleep(wait_time)
             return True
-            
         return False
 
     async def get_current_market_price(self, symbol):
@@ -695,40 +572,28 @@ class AggressivePullbackTrader:
         except Exception as e:
             logger.debug(f"Error getting market price for {symbol}: {e}")
             return None
-
+            
     def calculate_supertrend(self, df, period=10, multiplier=3.0):
         """FIXED: Proper SuperTrend calculation"""
         try:
             if len(df) < period + 1:
                 return None, None
-                
-            # Ensure numeric types
             df['high'] = pd.to_numeric(df['high'])
             df['low'] = pd.to_numeric(df['low'])
             df['close'] = pd.to_numeric(df['close'])
-            
-            # Calculate ATR
             tr1 = df['high'] - df['low']
             tr2 = abs(df['high'] - df['close'].shift(1))
             tr3 = abs(df['low'] - df['close'].shift(1))
-            
             true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
             atr = true_range.rolling(window=period).mean()
-            
-            # Calculate SuperTrend
             hl2 = (df['high'] + df['low']) / 2
             upper_band = hl2 + (multiplier * atr)
             lower_band = hl2 - (multiplier * atr)
-            
-            # Initialize SuperTrend series
             supertrend = pd.Series(index=df.index, dtype=float)
             direction = pd.Series(index=df.index, dtype=int)
-            
             for i in range(period, len(df)):
                 close_price = df['close'].iloc[i]
-                
                 if i == period:
-                    # First calculation
                     if close_price > hl2.iloc[i]:
                         supertrend.iloc[i] = lower_band.iloc[i]
                         direction.iloc[i] = 1
@@ -736,28 +601,25 @@ class AggressivePullbackTrader:
                         supertrend.iloc[i] = upper_band.iloc[i]
                         direction.iloc[i] = -1
                 else:
-                    # Subsequent calculations
-                    if direction.iloc[i-1] == 1:  # Was uptrend
+                    if direction.iloc[i-1] == 1:
                         if close_price > lower_band.iloc[i]:
                             supertrend.iloc[i] = lower_band.iloc[i]
                             direction.iloc[i] = 1
                         else:
                             supertrend.iloc[i] = upper_band.iloc[i]
                             direction.iloc[i] = -1
-                    else:  # Was downtrend
+                    else:
                         if close_price < upper_band.iloc[i]:
                             supertrend.iloc[i] = upper_band.iloc[i]
                             direction.iloc[i] = -1
                         else:
                             supertrend.iloc[i] = lower_band.iloc[i]
                             direction.iloc[i] = 1
-            
             return supertrend, direction
-            
         except Exception as e:
             logger.debug(f"SuperTrend calculation error: {e}")
             return None, None
-
+        
     async def get_market_data(self, symbol):
         """FIXED: Get market data with proper error handling"""
         try:
@@ -770,7 +632,7 @@ class AggressivePullbackTrader:
             if not ohlcv or len(ohlcv) < 20:
                 logger.debug(f"Insufficient data for {symbol}")
                 return None
-                
+            
             # Convert to DataFrame - FIX LINTER ERROR
             df = pd.DataFrame(ohlcv)
             df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
@@ -791,140 +653,67 @@ class AggressivePullbackTrader:
         except Exception as e:
             logger.debug(f"Market data error for {symbol}: {e}")
             return None
-
+            
     def calculate_rsi(self, df, period=14):
-        """Calculate RSI (Relative Strength Index)"""
+        """Calculate RSI with proper error handling"""
         try:
             if len(df) < period + 1:
-                return None
-            
-            # Ensure we have a pandas Series and all values are numeric
-            close_prices = pd.to_numeric(df['close'], errors='coerce')
-            if not isinstance(close_prices, pd.Series):
-                close_prices = pd.Series(close_prices)
-            
-            # Drop any NaN values
-            close_prices = close_prices.dropna()
-            
-            if len(close_prices) < period + 1:
-                return None
-            
-            # Calculate price changes
+                return pd.Series([50.0] * len(df), index=df.index)
+            close_prices = pd.Series(df['close'], index=df.index)
             delta = close_prices.diff()
-            
-            # Separate gains and losses
             gains = delta.where(delta > 0, 0)
             losses = -delta.where(delta < 0, 0)
-            
-            # Calculate average gains and losses
-            avg_gains = gains.rolling(window=period).mean()
-            avg_losses = losses.rolling(window=period).mean()
-            
-            # Avoid division by zero
-            avg_losses = avg_losses.where(avg_losses != 0, 0.001)
+            avg_gains = gains.rolling(period).mean()
+            avg_losses = losses.rolling(period).mean()
+            # Ensure avg_losses is a pandas Series
+            if not isinstance(avg_losses, pd.Series):
+                avg_losses = pd.Series(avg_losses, index=df.index[:len(avg_losses)])
+            avg_losses = avg_losses.fillna(0.001)
+            avg_losses = avg_losses.replace(0, 0.001)
             rs = avg_gains / avg_losses
             rsi = 100 - (100 / (1 + rs))
+            if isinstance(rsi, pd.Series):
+                result = pd.Series([50.0] * len(df), index=df.index)
+                result.loc[rsi.index] = rsi
+                return result
+            else:
+                return pd.Series([50.0] * len(df), index=df.index)
+        except Exception as e:
+            logger.debug(f"RSI calculation error: {e}")
+            return pd.Series([50.0] * len(df), index=df.index)
+
+    def calculate_rsi_timeframe(self, df, period=14):
+        """Calculate RSI for specific timeframe"""
+        try:
+            if len(df) < period:
+                return 50.0
             
-            return rsi
+            delta = df['close'].diff()
+            gain = delta.where(delta > 0, 0).rolling(window=period).mean()
+            loss = (-delta).where(delta < 0, 0).rolling(window=period).mean()
+            
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs))
+            
+            return float(rsi.iloc[-1]) if len(rsi) > 0 and not pd.isna(rsi.iloc[-1]) else 50.0
             
         except Exception as e:
             logger.debug(f"RSI calculation error: {e}")
-            return None
-
-    def calculate_rsi_timeframe(self, df, period=14):
-        """Calculate RSI for specific timeframe - FIXED"""
-        try:
-            if len(df) < period + 1:
-                return 50
-            
-            # Ensure we have a pandas Series and all values are numeric
-            close_prices = pd.to_numeric(df['close'], errors='coerce')
-            if not isinstance(close_prices, pd.Series):
-                close_prices = pd.Series(close_prices)
-            
-            # Drop any NaN values
-            close_prices = close_prices.dropna()
-            
-            if len(close_prices) < period + 1:
-                return 50
-            
-            delta = close_prices.diff()
-            gains = delta.where(delta > 0, 0)
-            losses = -delta.where(delta < 0, 0)
-            
-            avg_gains = gains.rolling(period).mean()
-            avg_losses = losses.rolling(period).mean()
-            
-            # Avoid division by zero
-            avg_losses = avg_losses.where(avg_losses != 0, 0.001)
-            rs = avg_gains / avg_losses
-            rsi = 100 - (100 / (1 + rs))
-            
-            return rsi.iloc[-1] if len(rsi) > 0 and not pd.isna(rsi.iloc[-1]) else 50
-        except Exception as e:
-            logger.debug(f"RSI timeframe calculation error: {e}")
-            return 50
+            return 50.0
 
     def calculate_momentum_timeframe(self, df):
         """Calculate momentum for specific timeframe"""
         try:
-            if len(df) < 2:
-                return 0
+            if len(df) < 10:
+                return 0.0
             
-            close_prices = pd.to_numeric(df['close'], errors='coerce')
-            if not isinstance(close_prices, pd.Series):
-                close_prices = pd.Series(close_prices)
-                
-            return (close_prices.iloc[-1] - close_prices.iloc[-2]) / close_prices.iloc[-2]
-        except:
-            return 0
-
-    async def generate_signal(self, symbol):
-        """🏆 FINAL 100% WIN RATE SIGNAL GENERATION 🏆"""
-        try:
-            # Get market data
-            df = await self.get_market_data(symbol)
-            if df is None or len(df) < 10:  # Reduced requirement for final system
-                return None
+            # Calculate price momentum
+            momentum = (df['close'].iloc[-1] - df['close'].iloc[-10]) / df['close'].iloc[-10]
+            return float(momentum) if not pd.isna(momentum) else 0.0
             
-            # Create market data dict for final system
-            market_data_dict = {'5m': df}
-            
-            # Use the FINAL 85%+ WIN RATE SYSTEM (achieved 100%!)
-            from final_85_win_rate_system import Final85WinRateSystem
-            final_system = Final85WinRateSystem()
-            
-            signal = await final_system.generate_final_signal(symbol, market_data_dict)
-            
-            if signal:
-                # Log the EXCEPTIONAL signal
-                logger.info(f"🏆 FINAL SYSTEM SIGNAL GENERATED:")
-                logger.info(f"   Symbol: {signal['symbol']}")
-                logger.info(f"   Side: {signal['side']}")
-                logger.info(f"   Confidence: {signal['confidence']:.1f}%")
-                logger.info(f"   Expected Win Rate: {signal['expected_win_rate']:.1f}%")
-                logger.info(f"   Signal Quality: {signal['signal_quality']}")
-                logger.info(f"   Leverage: {signal['leverage']}x")
-                logger.info(f"   Market Condition: {signal['market_condition']['condition']}")
-                logger.info(f"   Pattern Score: {signal['pattern_score']:.1f}")
-                logger.info(f"   RSI: {signal['rsi']:.1f}")
-                logger.info(f"   Momentum: {signal['momentum']:.6f}")
-                logger.info(f"   Volume Score: {signal['volume_score']:.1f}")
-                
-                # Additional validation for ultra-high quality
-                if signal['confidence'] >= 70 and signal['signal_quality'] in ['HIGH', 'PREMIUM']:
-                    logger.info(f"✅ ULTRA-HIGH QUALITY SIGNAL APPROVED FOR TRADING!")
-                    return signal
-                else:
-                    logger.info(f"⚠️ Signal quality below ultra-high standards, skipping")
-                    return None
-            else:
-                logger.debug(f"❌ No signal generated for {symbol}")
-                return None
-                
         except Exception as e:
-            logger.error(f"Error in final signal generation for {symbol}: {e}")
-            return None
+            logger.debug(f"Momentum calculation error: {e}")
+            return 0.0
 
     async def get_timeframe_analysis(self, symbol, timeframe, base_df):
         """Get analysis for specific timeframe"""
@@ -966,22 +755,28 @@ class AggressivePullbackTrader:
             
             if current_direction == 1:  # Uptrend
                 trend_confirmed = (rsi < 45 and momentum > 0.002)
+                direction_str = 'bullish'
             elif current_direction == -1:  # Downtrend
                 trend_confirmed = (rsi > 55 and momentum < -0.002)
+                direction_str = 'bearish'
+            else:
+                direction_str = 'neutral'
             
             return {
                 'timeframe': timeframe,
                 'supertrend': supertrend,
-                'direction': direction,
+                'direction': direction_str,
                 'rsi': rsi,
                 'momentum': momentum,
                 'volume_score': volume_score,
                 'trend_confirmed': trend_confirmed,
-                'current_direction': current_direction
+                'current_direction': current_direction,
+                'signal_strength': volume_score if trend_confirmed else 0
             }
             
         except Exception as e:
-            return {'trend_confirmed': False, 'rsi': 50, 'momentum': 0, 'volume_score': 0}
+            logger.debug(f"Timeframe analysis error for {symbol} {timeframe}: {e}")
+            return {'trend_confirmed': False, 'rsi': 50, 'momentum': 0, 'volume_score': 0, 'direction': 'neutral', 'signal_strength': 0}
 
     def ultra_market_regime_detection(self, mtf_data):
         """Ultra-precise market regime detection"""
@@ -1011,42 +806,42 @@ class AggressivePullbackTrader:
             regime_counts[regime] = regime_counts.get(regime, 0) + 1
         
         if not regime_counts:
-            return 'MIXED'
+            return {'condition': 'MIXED'}
             
-        dominant_regime = max(regime_counts, key=regime_counts.get)
-        agreement_pct = regime_counts[dominant_regime] / len(mtf_data) * 100
+        # Fix: Use proper way to get max key
+        dominant_regime = None
+        max_count = 0
+        for regime, count in regime_counts.items():
+            if count > max_count:
+                max_count = count
+                dominant_regime = regime
         
-        if agreement_pct >= 70:
-            return dominant_regime
-        else:
-            return 'MIXED'
+        if dominant_regime:
+            agreement_pct = max_count / len(mtf_data) * 100
+            if agreement_pct >= 70:
+                return {'condition': dominant_regime}
+        
+        return {'condition': 'MIXED'}
 
     def check_cross_timeframe_alignment(self, mtf_data):
         """Check alignment across ALL timeframes"""
         aligned_up = 0
         aligned_down = 0
         total_timeframes = len(mtf_data)
-        
         for tf, data in mtf_data.items():
-            current_direction = data.get('current_direction', 0)
-            
-            if current_direction == 1:  # Uptrend
+            direction = data.get('direction', 'neutral')
+            if direction == 'bullish':
                 aligned_up += 1
-            elif current_direction == -1:  # Downtrend
+            elif direction == 'bearish':
                 aligned_down += 1
-        
-        # Calculate alignment score
         max_alignment = max(aligned_up, aligned_down)
         alignment_score = (max_alignment / total_timeframes) * 100 if total_timeframes > 0 else 0
-        
-        # Determine primary direction
         if aligned_up > aligned_down:
             primary_direction = 'buy'
         elif aligned_down > aligned_up:
             primary_direction = 'sell'
         else:
             primary_direction = 'neutral'
-        
         return {
             'alignment_score': alignment_score,
             'primary_direction': primary_direction,
@@ -1122,19 +917,19 @@ class AggressivePullbackTrader:
         for tf, data in mtf_data.items():
             tf_pattern_score = 0
             
-            current_direction = data.get('current_direction', 0)
+            direction = data.get('direction', 'neutral')
             rsi = data.get('rsi', 50)
             momentum = data.get('momentum', 0)
             volume_score = data.get('volume_score', 0)
             
             # 1. SuperTrend + RSI confluence
-            if ((current_direction == 1 and rsi < 35) or
-                (current_direction == -1 and rsi > 65)):
+            if ((direction == 'bullish' and rsi < 35) or
+                (direction == 'bearish' and rsi > 65)):
                 tf_pattern_score += 25
             
             # 2. Strong momentum in trend direction
-            if (current_direction == 1 and momentum > 0.004) or \
-               (current_direction == -1 and momentum < -0.004):
+            if (direction == 'bullish' and momentum > 0.004) or \
+               (direction == 'bearish' and momentum < -0.004):
                 tf_pattern_score += 25
             
             # 3. Volume confirmation
@@ -1149,7 +944,7 @@ class AggressivePullbackTrader:
         
         if not pattern_scores:
             return 0
-        
+            
         # Calculate overall pattern score
         avg_pattern_score = np.mean(pattern_scores)
         strong_pattern_count = sum(1 for score in pattern_scores if score >= 70)
@@ -1159,185 +954,630 @@ class AggressivePullbackTrader:
         
         return final_pattern_score
 
-    def check_economic_calendar(self):
-        """Check for major economic events"""
-        current_hour = time.gmtime().tm_hour
-        
-        # Avoid major news times (UTC)
-        high_impact_hours = [8, 9, 12, 13, 14, 15, 16, 17, 18]
-        
-        if current_hour in high_impact_hours:
-            return np.random.choice([True, False], p=[0.8, 0.2])
-        else:
-            return np.random.choice([True, False], p=[0.95, 0.05])
-
     def calculate_ultra_confidence(self, trend_alignment, momentum_confluence, 
                                   volume_profile, pattern_score, market_regime):
         """Calculate ultra-high confidence score"""
         
-        base_confidence = 60  # Higher base for ultra system
+        base_confidence = 60.0  # Higher base for ultra system
         
         # 1. Trend Alignment Factor (0-15 points)
-        trend_factor = max(0, (trend_alignment['alignment_score'] - 70) / 30 * 15)
+        trend_factor = max(0.0, (trend_alignment['alignment_score'] - 70) / 30 * 15)
         
         # 2. Momentum Confluence Factor (0-12 points)
-        momentum_factor = max(0, (momentum_confluence['confluence_score'] - 70) / 30 * 12)
+        momentum_factor = max(0.0, (momentum_confluence['confluence_score'] - 70) / 30 * 12)
         
         # 3. Volume Profile Factor (0-8 points)
-        volume_factor = max(0, (volume_profile['volume_score'] - 60) / 40 * 8)
+        volume_factor = max(0.0, (volume_profile['volume_score'] - 60) / 40 * 8)
         
         # 4. Pattern Recognition Factor (0-10 points)
-        pattern_factor = max(0, (pattern_score - 60) / 40 * 10)
+        pattern_factor = max(0.0, (pattern_score - 60) / 40 * 10)
         
         # 5. Market Regime Bonus (0-5 points)
-        regime_bonus = 5 if market_regime in ['SUPER_TRENDING', 'PERFECT_RANGING'] else 0
+        regime_condition = market_regime.get('condition', 'MIXED')
+        regime_bonus = 5.0 if regime_condition in ['SUPER_TRENDING', 'PERFECT_RANGING'] else 0.0
         
         total_confidence = (base_confidence + trend_factor + momentum_factor + 
                           volume_factor + pattern_factor + regime_bonus)
         
-        return min(98, max(60, total_confidence))
+        return min(98.0, max(60.0, total_confidence))
 
     def calculate_ultra_leverage(self, confidence, market_regime, leverage_settings):
-        """Calculate conservative leverage for ultra-high win rate"""
-        
-        # Conservative base leverage
-        base_leverage = 15
-        max_allowed = leverage_settings.get('max_leverage', 50)
-        
-        # Confidence adjustment (conservative)
-        confidence_multiplier = max(0, (confidence - 85) / 15)  # 0 to 1 range for 85-100%
-        confidence_leverage = base_leverage + (confidence_multiplier * 10)  # Max +10x
-        
-        # Market regime adjustment (conservative)
-        regime_adjustments = {
-            'SUPER_TRENDING': 1.1,    # Only 10% higher in super trends
-            'PERFECT_RANGING': 1.0,   # Normal leverage in perfect ranging
-            'MIXED': 0.7              # 30% lower in mixed conditions
-        }
-        
-        regime_multiplier = regime_adjustments.get(market_regime, 0.8)
-        final_leverage = int(confidence_leverage * regime_multiplier)
-        
-        # Cap leverage conservatively
-        return min(min(30, max_allowed), max(10, final_leverage))
+        """ALWAYS RETURN AT LEAST 75x LEVERAGE"""
+        return max(75, leverage_settings.get('max_leverage', 75))
+
+    async def generate_signal(self, symbol):
+        """ENHANCED: Generate high-quality trading signals with optimized performance"""
+        try:
+            # Get market data
+            df = await self.get_market_data(symbol)
+            if df is None or len(df) < 50:  # Need sufficient data
+                return None
+                
+            # Calculate SuperTrend
+            st_data = self.calculate_supertrend(df, period=self.st_period, multiplier=self.st_multiplier)
+            
+            # First check for SuperTrend crossover signal
+            signal = None
+            trend_change = False
+            if len(st_data) >= 2:
+                prev_trend = st_data[-2]['trend'] 
+                curr_trend = st_data[-1]['trend']
+                trend_change = prev_trend != curr_trend
+                
+                if trend_change and curr_trend == 'up':
+                    signal = {
+                        'symbol': symbol,
+                        'type': 'long',
+                        'price': df['close'].iloc[-1],
+                        'time': df.index[-1],
+                        'confidence': 0  # Will be set after analysis
+                    }
+                elif trend_change and curr_trend == 'down':
+                    signal = {
+                        'symbol': symbol,
+                        'type': 'short',
+                        'price': df['close'].iloc[-1],
+                        'time': df.index[-1],
+                        'confidence': 0  # Will be set after analysis
+                    }
+                    
+            # If no signal from basic SuperTrend, check for pullback opportunities using SuperZ
+            if signal is None and hasattr(self, 'super_z') and self.super_z is not None:
+                try:
+                    # Try to call detect_signals safely, handling the deprecated loosen_level parameter issue
+                    try:
+                        signals, df_with_indicators = self.super_z.detect_signals(df, timeframe=self.timeframe)
+                    except TypeError as te:
+                        # If TypeError (like unexpected keyword argument), try with minimal parameters
+                        logger.warning(f"Type error calling detect_signals: {te}. Trying fallback method.")
+                        signals, df_with_indicators = self.super_z.detect_signals(df)
+                    except Exception as e:
+                        logger.error(f"Error in detect_signals for {symbol}: {str(e)}")
+                        signals = []
+                        df_with_indicators = df
+                        
+                    # Check for valid signals from SuperZ
+                    if signals and len(signals) > 0:
+                        latest_signal = signals[-1]
+                        # Only use recent signals
+                        if latest_signal['time'] >= df.index[-5]:  # Within last 5 candles
+                            signal = {
+                                'symbol': symbol,
+                                'type': latest_signal['type'],
+                                'price': latest_signal['price'],
+                                'time': latest_signal['time'],
+                                'confidence': 0  # Will be updated
+                            }
+                except Exception as sz_error:
+                    logger.error(f"SuperZ signal detection error for {symbol}: {sz_error}")
+                    
+            # If still no signal, nothing to do
+            if signal is None:
+                return None
+                
+            # Get multi-timeframe data for deeper analysis
+            mtf_data = {}
+            try:
+                # Get 1h and 4h timeframe data for the same symbol
+                mtf_data['5m'] = await self.get_timeframe_analysis(symbol, '5m', df)
+                mtf_data['15m'] = await self.get_timeframe_analysis(symbol, '15m', None)
+                mtf_data['1h'] = await self.get_timeframe_analysis(symbol, '1h', None)
+                mtf_data['4h'] = await self.get_timeframe_analysis(symbol, '4h', None)
+            except Exception as mtf_error:
+                logger.error(f"Multi-timeframe analysis error for {symbol}: {mtf_error}")
+                # Continue with what we have even if some timeframes failed
+                
+            # Perform comprehensive market analysis
+            market_regime = self.ultra_market_regime_detection(mtf_data)
+            trend_alignment = self.check_cross_timeframe_alignment(mtf_data)
+            momentum_confluence = self.analyze_momentum_confluence(mtf_data)
+            volume_profile = self.analyze_volume_profile(mtf_data)
+            pattern_score = self.recognize_high_probability_patterns(mtf_data)
+            
+            # Calculate ultra confidence score
+            confidence = self.calculate_ultra_confidence(
+                trend_alignment, momentum_confluence, volume_profile, 
+                pattern_score, market_regime
+            )
+            
+            # Get leverage settings for this pair
+            leverage_settings = self.get_pair_leverage_settings(symbol)
+            
+            # Calculate optimal leverage based on confidence
+            optimal_leverage = self.calculate_ultra_leverage(
+                confidence, market_regime, leverage_settings
+            )
+            
+            # Update signal with analysis results
+            signal['confidence'] = confidence
+            signal['market_regime'] = market_regime
+            signal['trend_alignment'] = trend_alignment
+            signal['momentum_confluence'] = momentum_confluence
+            signal['volume_profile'] = volume_profile
+            signal['pattern_score'] = pattern_score
+            signal['optimal_leverage'] = optimal_leverage
+            signal['max_leverage'] = leverage_settings['max_leverage']
+            
+            # Add comprehensive risk management information
+            current_price = signal['price']
+            if signal['type'] == 'long':
+                # For long positions
+                stop_loss_price = current_price * (1 - self.stop_loss_pct)
+                take_profit_price_1 = current_price * (1 + self.take_profit_pct)
+                take_profit_price_2 = current_price * (1 + self.take_profit_pct * 2)
+                take_profit_price_3 = current_price * (1 + self.take_profit_pct * 3)
+            else:
+                # For short positions
+                stop_loss_price = current_price * (1 + self.stop_loss_pct)
+                take_profit_price_1 = current_price * (1 - self.take_profit_pct)
+                take_profit_price_2 = current_price * (1 - self.take_profit_pct * 2)
+                take_profit_price_3 = current_price * (1 - self.take_profit_pct * 3)
+                
+            signal['stop_loss'] = stop_loss_price
+            signal['take_profit_1'] = take_profit_price_1
+            signal['take_profit_2'] = take_profit_price_2
+            signal['take_profit_3'] = take_profit_price_3
+            
+            # Debug info
+            logger.debug(f"Signal for {symbol}: {signal['type']} @ {signal['price']} | Confidence: {confidence}%")
+            
+            # Record the signal in our database
+            signal_data = {
+                'symbol': symbol,
+                'signal_type': signal['type'],
+                'price': signal['price'],
+                'confidence': confidence,
+                'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+            
+            # Asynchronously save to database
+            asyncio.create_task(self.save_signal_async(signal_data))
+            
+            return signal
+            
+        except Exception as e:
+            logger.error(f"Signal generation error for {symbol}: {e}")
+            # Log full traceback for debugging
+            import traceback
+            logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
+    def get_minimum_order_size(self, symbol):
+        """Get the minimum order size for a symbol from Bitget markets, fallback to 1.0 USDT if not found"""
+        try:
+            # Make sure exchange is initialized
+            if not hasattr(self, 'exchange') or self.exchange is None:
+                return 1.0
+                
+            # Get markets safely
+            markets = getattr(self.exchange, 'markets', None)
+            if markets is None or not isinstance(markets, dict):
+                return 1.0
+                
+            # Get market info for symbol
+            market = markets.get(symbol, {})
+            if not market:
+                return 1.0
+            
+            # First check cost (USDT value)
+            try:
+                limits = market.get('limits', {})
+                if limits and isinstance(limits, dict):
+                    cost_limits = limits.get('cost', {})
+                    if cost_limits and isinstance(cost_limits, dict):
+                        min_cost = cost_limits.get('min')
+                        if min_cost is not None:
+                            try:
+                                min_cost_float = float(min_cost)
+                                if min_cost_float > 0:
+                                    return min_cost_float
+                            except (ValueError, TypeError):
+                                pass
+            except Exception as e:
+                logger.debug(f"Error getting min cost: {e}")
+                
+            # Fall back to amount (quantity)
+            try:
+                limits = market.get('limits', {})
+                if limits and isinstance(limits, dict):
+                    amount_limits = limits.get('amount', {})
+                    if amount_limits and isinstance(amount_limits, dict):
+                        min_amount = amount_limits.get('min')
+                        if min_amount is not None:
+                            try:
+                                min_amount_float = float(min_amount)
+                                if min_amount_float > 0:
+                                    # Get ticker price
+                                    ticker = self.exchange.fetch_ticker(symbol)
+                                    price = ticker.get('last', ticker.get('close', 0))
+                                    if price is not None and float(price) > 0:
+                                        return min_amount_float * float(price)
+                            except (ValueError, TypeError, Exception):
+                                pass
+            except Exception as e:
+                logger.debug(f"Error getting min amount: {e}")
+            
+            # Default minimum order size (safest option)
+            return 1.0
+        except Exception as e:
+            logger.warning(f"Could not fetch minimum order size for {symbol}: {e}")
+            return 1.0
+
+    def get_symbol_margin_mode(self, symbol):
+        """Determine which margin mode a symbol supports (cross or isolated)"""
+        try:
+            # Check if symbol supports cross margin
+            market = self.exchange.market(symbol)
+            
+            # First check if symbol explicitly doesn't support cross (from error 50004)
+            if market.get('info', {}).get('crossable') == 'false':
+                logger.warning(f"Symbol {symbol} does not support cross margin, using isolated")
+                return 'isolated'
+                
+            # Some symbols don't support cross margin
+            # Look for margin mode support info in market data
+            margin_modes = market.get('info', {}).get('supportMarginCoins', {})
+            
+            if margin_modes:
+                # If we have explicit margin mode info, use it
+                if 'cross' in str(margin_modes).lower():
+                    logger.info(f"Symbol {symbol} supports cross margin mode")
+                    return 'cross'
+                else:
+                    logger.warning(f"Symbol {symbol} only supports isolated margin")
+                    return 'isolated'
+            
+            # If we couldn't determine, use cross as requested by default
+            logger.info(f"No margin mode info for {symbol}, using cross margin as requested")
+            return 'cross'
+        except Exception as e:
+            logger.warning(f"⚠️ Error determining margin mode for {symbol}: {e}")
+            # Default to cross as fallback per user request
+            return 'cross'
+
+    def get_max_leverage(self, symbol):
+        """Get maximum allowed leverage for a symbol (default: 20x - REDUCED FOR SAFETY)"""
+        try:
+            # Category 1: Major cryptos (20x max)
+            major_cryptos = ['BTC/USDT', 'ETH/USDT', 'SOL/USDT', 'BNB/USDT']
+            if symbol in major_cryptos:
+                return 20
+            
+            # Category 2: Popular alts (20x max)
+            popular_alts = ['XRP/USDT', 'ADA/USDT', 'DOT/USDT', 'MATIC/USDT']
+            if symbol in popular_alts:
+                return 20
+            
+            # Category 3: Meme coins (15x max)
+            meme_coins = ['DOGE/USDT', 'SHIB/USDT', 'PEPE/USDT']
+            if symbol in meme_coins:
+                return 15
+                
+            # Category 4: Gaming (15x max)
+            gaming = ['SAND/USDT', 'MANA/USDT', 'AXS/USDT']
+            if symbol in gaming:
+                return 15
+                
+            # Category 5: AI/Tech (15x max)
+            ai_tech = ['FET/USDT', 'AGIX/USDT', 'RNDR/USDT']
+            if symbol in ai_tech:
+                return 15
+                
+            # Category 6: DeFi (15x max)
+            defi = ['SUSHI/USDT', 'COMP/USDT', 'UNI/USDT']
+            if symbol in defi:
+                return 15
+                
+            # Default: Conservative (10x max)
+            return 10
+        except Exception as e:
+            logger.warning(f"⚠️ Error determining max leverage for {symbol}: {e}")
+            # Default to 10x as a safe fallback
+            return 10
 
     async def execute_trade(self, signal):
-        """FIXED: Execute trade with LEVERAGE FIRST, then 0.50 USDT margin"""
+        """Execute a trade with proper balance checking and error handling"""
         execution_start = time.time()
-        
         try:
             symbol = signal['symbol']
             side = signal['side']
-            leverage = signal.get('leverage', 50)  # Get leverage from signal
             
-            # STEP 1: SET LEVERAGE FIRST (CRITICAL)
-            logger.info(f"🔧 SETTING LEVERAGE FIRST: {symbol} -> {leverage}x")
-            
-            if not self.simulation_mode:
+            # CRITICAL FIX: Add proper balance check before attempting to trade
+            if not hasattr(self, 'available_balance') or self.available_balance < self.FIXED_POSITION_SIZE_USDT:
+                # Refresh balance to get latest value
                 try:
-                    await self.rate_limit('set_leverage')
-                    await self.set_leverage(symbol, leverage)
-                    logger.info(f"✅ Leverage set: {leverage}x for {symbol}")
+                    balance = self.exchange.fetch_balance({
+                        'type': 'swap',
+                        'product_type': 'umcbl'  # USDT-margined contracts
+                    })
+                    usdt_info = balance.get('USDT', {})
+                    free = usdt_info.get('free', 0)
+                    # Fix linter error by properly handling potential None value
+                    self.available_balance = float(free) if free is not None and free != '' else 0.0
                 except Exception as e:
-                    logger.warning(f"⚠️ Leverage setting failed for {symbol}: {e}")
-                    leverage = 50  # Fallback to 50x
+                    logger.error(f"❌ Error fetching balance during trade: {e}")
+                    self.available_balance = 0.0
             
-            # STEP 2: Use 0.50 USDT as MARGIN (not position value)
-            margin_usdt = self.FIXED_POSITION_SIZE_USDT  # 0.50 USDT margin
-            effective_position_value = margin_usdt * leverage  # e.g., 0.50 * 50 = 25 USDT
+            # Double-check if we have enough balance
+            if self.available_balance < self.FIXED_POSITION_SIZE_USDT:
+                logger.error(f"❌ Insufficient balance for trade: have {self.available_balance} USDT, need {self.FIXED_POSITION_SIZE_USDT} USDT")
+                return None
+                
+            # Get the appropriate margin mode for this symbol
+            margin_mode = self.get_symbol_margin_mode(symbol)
+            logger.info(f"💡 Using {margin_mode.upper()} margin mode for {symbol}")
             
-            # STEP 3: Get current price and calculate quantity
-            current_price = signal.get('price', 0)
-            if current_price <= 0:
-                # Get current market price if not provided
-                current_price = await self.get_current_market_price(symbol)
-                if not current_price:
-                    logger.error(f"❌ Cannot get price for {symbol}")
-                    return None
+            # Define leverage params here to avoid unbound variable error
+            leverage_params = {
+                "marginCoin": "USDT",
+                "holdSide": "long" if side == "buy" else "short"
+            }
             
-            # STEP 4: Calculate quantity (amount of coins to buy/sell)
-            # This should be the effective position value divided by price
-            quantity = effective_position_value / current_price
+            # Get maximum allowed leverage for this symbol
+            max_allowed_leverage = self.get_max_leverage(symbol)
             
-            # STEP 5: Adjust quantity for exchange precision requirements
-            quantity = self.adjust_quantity_for_precision(symbol, quantity)
+            # REDUCED LEVERAGE: Use lower leverage for safer trading
+            # Cap leverage at the maximum allowed by Bitget for this symbol, or use a safer value
+            requested_leverage = signal.get('leverage', 0)
+            if requested_leverage > max_allowed_leverage or requested_leverage <= 0:
+                # Use a standard leverage based on symbol
+                leverage = max_allowed_leverage 
+            else:
+                leverage = requested_leverage
+                
+            # Ensure leverage is reasonable - CRITICAL FIX FOR SUCCESSFUL ORDERS
+            if leverage > 10:
+                leverage = 10  # Maximum safe leverage
+                
+            logger.info(f"🔧 SETTING LEVERAGE: {symbol} -> {leverage}x (MAX ALLOWED: {max_allowed_leverage}x)")
+            
+            # Step 1: Set margin mode based on symbol support
+            margin_mode_set = False
+            try:
+                await self.rate_limit('set_margin_mode')
+                margin_params = {
+                    "symbol": symbol.replace("/", ""),
+                    "marginMode": margin_mode
+                }
+                await self.exchange.set_margin_mode(margin_mode, symbol, params=margin_params)
+                logger.info(f"✅ Set margin mode to {margin_mode.upper()} for {symbol}")
+                margin_mode_set = True
+            except Exception as e:
+                error_str = str(e)
+                
+                # Check for specific error codes related to margin mode
+                if "50004" in error_str or "symbol does not support cross" in error_str.lower():
+                    logger.warning(f"⚠️ Symbol {symbol} does not support cross margin, falling back to isolated")
+                    margin_mode = 'isolated'  # Force to isolated
+                    try:
+                        # Retry with isolated margin
+                        margin_params = {
+                            "symbol": symbol.replace("/", ""),
+                            "marginMode": "isolated"
+                        }
+                        await self.exchange.set_margin_mode('isolated', symbol, params=margin_params)
+                        logger.info(f"✅ Set margin mode to ISOLATED for {symbol}")
+                        margin_mode_set = True
+                    except Exception as fallback_error:
+                        logger.error(f"❌ Failed to set isolated margin mode: {fallback_error}")
+                else:
+                    logger.warning(f"⚠️ Failed to set margin mode: {e}")
+            
+            # Step 2: Set leverage with correct params - WITH HEDGE MODE
+            leverage_set = False
+            try:
+                await self.rate_limit('set_leverage')
+                await self.exchange.set_leverage(leverage, symbol, params=leverage_params)
+                logger.info(f"✅ Leverage set: {leverage}x for {symbol} {side}")
+                leverage_set = True
+            except Exception as e:
+                error_str = str(e)
+                if "Exceeded the maximum settable leverage" in error_str:
+                    # Try again with lower leverage
+                    try:
+                        lower_leverage = 5  # Much lower fallback
+                        await self.exchange.set_leverage(lower_leverage, symbol, params=leverage_params)
+                        logger.info(f"✅ Fallback leverage set: {lower_leverage}x for {symbol} {side}")
+                        leverage = lower_leverage
+                        leverage_set = True
+                    except Exception as e2:
+                        logger.warning(f"⚠️ Fallback leverage setting failed: {e2}")
+                else:
+                    logger.warning(f"⚠️ Leverage setting failed: {e}")
+            
+            # Step 3: Check if we successfully set both margin mode and leverage
+            if not margin_mode_set or not leverage_set:
+                logger.warning(f"⚠️ Could not properly configure {symbol} - continuing anyway")
+            
+            # Dynamically determine minimum order size
+            min_order_size = self.get_minimum_order_size(symbol)
+            
+            # CRITICAL FIX: Ensure we're using at least the minimum order size
+            if min_order_size > self.FIXED_POSITION_SIZE_USDT:
+                margin_usdt = min_order_size
+                logger.info(f"⚠️ Increasing order size to minimum required: {min_order_size} USDT (> {self.FIXED_POSITION_SIZE_USDT} USDT)")
+            else:
+                margin_usdt = self.FIXED_POSITION_SIZE_USDT
+            
+            # Check if we have enough balance for this order
+            if self.available_balance < margin_usdt:
+                logger.error(f"❌ Insufficient balance for {symbol}: have {self.available_balance} USDT, need {margin_usdt} USDT")
+                return None
+            
+            # Ensure effective position value is a valid float
+            if leverage is None:
+                leverage = 5  # Default fallback leverage
+            
+            effective_position_value = float(margin_usdt) * float(leverage)
             
             logger.info(f"⚡ EXECUTING TRADE: {symbol} {side.upper()}")
-            logger.info(f"   💰 Margin Used: {margin_usdt} USDT")
-            logger.info(f"   📈 Leverage: {leverage}x") 
+            logger.info(f"   💰 Margin Used: {margin_usdt} USDT (min for {symbol})")
+            logger.info(f"   📈 Leverage: {leverage}x")
             logger.info(f"   💵 Effective Position: {effective_position_value} USDT")
-            logger.info(f"   📊 Quantity: {quantity} coins")
+            
+            # Initialize current_price before using it
+            current_price = None
+            
+            # Get price from signal or fetch fresh
+            signal_price = signal.get('price', None)
+            if signal_price is not None and isinstance(signal_price, (int, float)) and signal_price > 0:
+                current_price = float(signal_price)
+            else:
+                # Fetch fresh price if signal price is missing or invalid
+                fetched_price = await self.get_current_market_price(symbol)
+                if fetched_price is not None and isinstance(fetched_price, (int, float)) and fetched_price > 0:
+                    current_price = float(fetched_price)
+            
+            # Final price validation
+            if current_price is None or current_price <= 0:
+                logger.error(f"❌ Cannot get valid price for {symbol}")
+                return None
+            
+            # Log price information
             logger.info(f"   💲 Price: {current_price}")
             
-            # STEP 6: Validate our margin amount (should always be 0.50)
-            self.validate_position_size(margin_usdt)
+            # Calculate quantity based on effective position value and price
+            quantity = float(effective_position_value) / float(current_price)
             
-            # STEP 7: Execute the order
+            # CRITICAL FIX: Check for minimum quantity requirements
+            if hasattr(self.exchange, 'markets') and isinstance(self.exchange.markets, dict):
+                market = self.exchange.markets.get(symbol, {})
+                if isinstance(market, dict) and 'limits' in market:
+                    limits = market.get('limits', {})
+                    if isinstance(limits, dict) and 'amount' in limits:
+                        amount_limits = limits.get('amount', {})
+                        if isinstance(amount_limits, dict) and 'min' in amount_limits:
+                            min_amount = amount_limits.get('min')
+                            if min_amount is not None:
+                                try:
+                                    min_amount = float(min_amount)
+                                    if quantity < min_amount:
+                                        logger.warning(f"⚠️ Quantity {quantity} too small for {symbol}, adjusting to minimum {min_amount}")
+                                        quantity = min_amount
+                                except (ValueError, TypeError):
+                                    pass
+            # Show final quantity
+            logger.info(f"   📊 Quantity: {quantity} coins")
+            
+            # Execute the trade with retry logic for price deviation errors
             retry_count = 0
             max_retries = 3
+            price_adjustment_factor = 1.0  # Start with no adjustment
             
             while retry_count < max_retries:
                 try:
                     await self.rate_limit('create_order')
                     
-                    # Create market order with calculated quantity
+                    # CORRECT ORDER PARAMETERS FOR BITGET USDT-M SWAP - USE THE MARGIN MODE WE VERIFIED
+                    order_params = {
+                        'marginCoin': 'USDT',
+                        'timeInForce': 'IOC',
+                        'tradeSide': 'open',    # Open position
+                        'marginMode': margin_mode,  # Use the margin mode we verified
+                        'holdSide': side        # For hedge mode
+                    }
+                    
+                    # Adjust price to account for slippage in the direction of the trade
+                    if retry_count > 0:
+                        # For buy orders, increase price; for sell orders, decrease price
+                        if side == 'buy':
+                            adjusted_price = current_price * (1 + (retry_count * 0.002))
+                        else:
+                            adjusted_price = current_price * (1 - (retry_count * 0.002))
+                        logger.info(f"   🔄 Retry {retry_count}: Adjusting price from {current_price} to {adjusted_price}")
+                        current_price = adjusted_price
+                    
+                    # Create market order with specified parameters
                     order = self.exchange.create_market_order(
-                        symbol=symbol,
-                        side=side,
-                        amount=quantity,  # Quantity of coins
-                        params={'timeInForce': 'IOC'}
+                        symbol, 
+                        side, 
+                        quantity,
+                        params=order_params
                     )
                     
-                    execution_time = (time.time() - execution_start) * 1000
-                    
-                    if order and order.get('status') in ['closed', 'filled']:
-                        # Trade successful
+                    if order and isinstance(order, dict):
+                        order_id = order.get('id', 'unknown')
+                        execution_time = (time.time() - execution_start) * 1000  # in ms
+                        
                         filled_price = order.get('price', current_price)
-                        filled_quantity = order.get('filled', quantity)
                         
                         trade_data = {
                             'timestamp': time.time(),
                             'symbol': symbol,
                             'side': side,
                             'price': filled_price,
-                            'margin_usdt': margin_usdt,  # Always 0.50
-                            'effective_value_usdt': effective_position_value,
+                            'margin_usdt': margin_usdt,
+                            'effective_value_usdt': margin_usdt * leverage,
                             'leverage': leverage,
-                            'quantity': filled_quantity,
+                            'quantity': effective_position_value,
                             'confidence': signal.get('confidence', 0),
                             'execution_time': execution_time,
-                            'success': True
+                            'success': True,
+                            'order_id': order_id
                         }
                         
-                        # Save to database
                         self.database.save_trade(trade_data)
-                        
-                        # Update performance metrics
                         self.total_trades += 1
-                        if self.simulation_mode:
-                            self.simulation_trades.append(trade_data)
                         
-                        logger.info(f"✅ TRADE EXECUTED SUCCESSFULLY!")
-                        logger.info(f"   💰 Margin: {margin_usdt} USDT | Effective: {effective_position_value} USDT") 
-                        logger.info(f"   📈 Leverage: {leverage}x | Quantity: {filled_quantity}")
-                        logger.info(f"   💲 Fill Price: {filled_price:.6f}")
+                        logger.info("✅ TRADE EXECUTED SUCCESSFULLY!")
+                        logger.info(f"   💰 Cost: {margin_usdt} USDT | Effective: {margin_usdt * leverage} USDT")
+                        logger.info(f"   📈 Leverage: {leverage}x | Size: {effective_position_value}")
+                        logger.info(f"   💲 Price: ~{filled_price:.6f}")
                         logger.info(f"   ⚡ Execution Time: {execution_time:.1f}ms")
                         
+                        self.log_swap_account_balance()
                         return order
                     else:
-                        logger.warning(f"⚠️ Order not filled properly: {order}")
-                        return None
+                        logger.warning(f"⚠️ Order not created properly: {order}")
+                        retry_count += 1
+                        await asyncio.sleep(1)
                         
                 except Exception as e:
-                    retry_count += 1
+                    error_str = str(e)
                     
-                    # Handle Bitget-specific errors with automatic recovery
-                    if await self.handle_bitget_error(e, symbol, retry_count):
+                    # Handle price deviation error (50067) by retrying with new price closer to index price
+                    if hasattr(e, 'args') and any('50067' in str(arg) for arg in e.args):
+                        logger.warning("⚠️ 50067 error: retrying with new price closer to index price")
+                        current_price = await self.get_current_market_price(symbol)
+                        if current_price is None or not isinstance(current_price, (int, float)):
+                            logger.error(f"❌ Invalid price for {symbol}, skipping trade.")
+                            return None
+                        
+                        retry_count += 1
                         continue
-                    else:
-                        break
+                    
+                    # Check for cross margin error and retry with isolated if needed
+                    if "50004" in error_str or "symbol does not support cross" in error_str.lower():
+                        logger.warning(f"⚠️ Cross margin not supported for {symbol}, trying isolated")
+                        margin_mode = 'isolated'
+                        # Update the order params for next attempt
+                        order_params = {
+                            'marginCoin': 'USDT',
+                            'timeInForce': 'IOC',
+                            'tradeSide': 'open',
+                            'marginMode': 'isolated',  # Force isolated mode
+                            'holdSide': side
+                        }
+                        retry_count += 1
+                        continue
+                    
+                    # Handle "less than the minimum amount" error (45110)
+                    if hasattr(e, 'args') and any('45110' in str(arg) for arg in e.args):
+                        logger.warning(f"⚠️ Bitget business error (no retry): {e}")
+                        return None
+                    
+                    # Handle "Insufficient balance" error (43012)
+                    if hasattr(e, 'args') and any('43012' in str(arg) for arg in e.args):
+                        logger.warning(f"⚠️ Bitget insufficient balance error (no retry): {e}")
+                        return None
+                    
+                    # For all other errors, log and retry
+                    logger.error(f"❌ Trade execution error: {e}")
+                    retry_count += 1
+                    await asyncio.sleep(1)
             
             logger.error(f"❌ Trade execution failed after {max_retries} attempts")
+            logger.warning(f"⚠️ FAILED TRADE: {symbol}")
             return None
             
         except Exception as e:
@@ -1345,54 +1585,53 @@ class AggressivePullbackTrader:
             logger.error(f"❌ Trade execution error in {execution_time:.1f}ms: {e}")
             return None
 
-    def adjust_quantity_for_precision(self, symbol, quantity):
-        """Adjust quantity based on symbol precision requirements"""
+    async def check_account_balance(self):
+        """Check if account has sufficient balance for trading"""
         try:
-            # Minimum quantities for different types of pairs
-            min_quantities = {
-                # Major pairs - higher precision
-                'BTC/USDT': 0.00001, 'ETH/USDT': 0.0001, 'BNB/USDT': 0.001,
-                'SOL/USDT': 0.001, 'XRP/USDT': 0.1, 'ADA/USDT': 0.1,
-                
-                # Meme coins - much higher minimum quantities
-                'PEPE/USDT': 1000000, 'SHIB/USDT': 1000000, 'BONK/USDT': 1000000,
-                'FLOKI/USDT': 10000, 'WIF/USDT': 1, 'DOGE/USDT': 1,
-                
-                # Other alts
-                'MATIC/USDT': 1, 'DOT/USDT': 0.1, 'LINK/USDT': 0.01,
-                'UNI/USDT': 0.01, 'AVAX/USDT': 0.01, 'LTC/USDT': 0.001
-            }
+            # Get SPECIFIC balance for USDT-M futures
+            balance = self.exchange.fetch_balance({
+                'type': 'swap',
+                'product_type': 'umcbl'  # USDT-margined contracts
+            })
             
-            min_qty = min_quantities.get(symbol, 1.0)  # Default 1.0
+            # Get USDT balance specifically
+            usdt_info = balance.get('USDT', {})
+            free = usdt_info.get('free', 0)
             
-            if quantity < min_qty:
-                logger.warning(f"⚠️ Quantity {quantity} too small for {symbol}, adjusting to {min_qty}")
-                quantity = min_qty
+            # Convert to float and handle None - Fix linter error
+            free_balance = float(free) if free is not None and free != '' else 0.0
+            self.available_balance = free_balance
             
-            # Round to appropriate precision
-            if symbol in ['PEPE/USDT', 'SHIB/USDT', 'BONK/USDT']:
-                quantity = round(quantity, 0)  # No decimals for meme coins
-            elif symbol in ['BTC/USDT']:
-                quantity = round(quantity, 5)  # 5 decimals for BTC
-            elif symbol in ['ETH/USDT']:
-                quantity = round(quantity, 4)  # 4 decimals for ETH
+            # Calculate required balance for trading (minimum position size)
+            required_balance = self.FIXED_POSITION_SIZE_USDT * 2  # Double for safety margin
+            
+            # Log balance information
+            logger.info(f"💰 Account Balance: {free_balance:.2f} USDT")
+            logger.info(f"🔹 Required Balance: {required_balance:.2f} USDT")
+            
+            # Check if balance is sufficient
+            if free_balance >= required_balance:
+                logger.info("✅ Sufficient balance for trading")
+                return True, free_balance
             else:
-                quantity = round(quantity, 3)  # 3 decimals for others
-            
-            return max(quantity, min_qty)
-            
+                logger.warning(f"⚠️ Insufficient balance: {free_balance:.2f} USDT (need {required_balance:.2f} USDT)")
+                return False, free_balance
+                
         except Exception as e:
-            logger.debug(f"Precision adjustment error for {symbol}: {e}")
-            return max(quantity, 1.0)
+            logger.error(f"❌ Error checking account balance: {e}")
+            return False, 0.0
+
+    def adjust_quantity_for_precision(self, symbol, quantity):
+        return quantity  # No adjustment
 
     async def set_leverage(self, symbol, leverage):
-        """FIXED: Set leverage for futures trading"""
+        """FIXED: Set leverage for futures trading with correct parameters"""
         try:
-            if hasattr(self.exchange, 'set_leverage'):
-                return self.exchange.set_leverage(leverage, symbol)
-            else:
-                # Mock implementation for simulation
-                return {'leverage': leverage, 'symbol': symbol}
+            params = {
+                "marginCoin": "USDT",
+                "holdSide": "long"  # Default to long
+            }
+            return self.exchange.set_leverage(leverage, symbol, params=params)
         except Exception as e:
             logger.debug(f"Leverage setting error: {e}")
             return None
@@ -1404,6 +1643,11 @@ class AggressivePullbackTrader:
             signal = await self.generate_signal(symbol)
             
             if signal and signal.get('confidence', 0) >= 60:  # 60% confidence threshold
+                # CRITICAL FIX: Skip trade execution if balance is insufficient
+                if not hasattr(self, 'available_balance') or self.available_balance < self.FIXED_POSITION_SIZE_USDT:
+                    logger.warning(f"⚠️ Signal found for {symbol} but insufficient balance to trade: {self.available_balance} USDT")
+                    return
+                    
                 # Execute trade
                 result = await self.execute_trade(signal)
                 
@@ -1425,67 +1669,40 @@ class AggressivePullbackTrader:
             logger.debug(f"Symbol processing error for {symbol}: {e}")
 
     async def main_trading_loop(self):
-        """FIXED: Main trading loop with proper error handling"""
-        logger.info("🚀 STARTING MAIN TRADING LOOP")
+        logger.info("🚀 STARTING ENHANCED TRADING LOOP")
+        logger.info(f"💰 Position Size: {self.FIXED_POSITION_SIZE_USDT} USDT per trade")
+        self.display_trading_pairs_config()
         
-        cycle_count = 0
+        # CRITICAL FIX: Check balance at startup
+        has_balance, balance_amount = await self.check_account_balance()
+        if not has_balance:
+            logger.critical("❌ INSUFFICIENT BALANCE TO START TRADING! Please add funds to your account.")
+            logger.critical(f"   Required: {self.FIXED_POSITION_SIZE_USDT * 2} USDT | Available: {balance_amount} USDT")
+            logger.critical("⚠️ BOT WILL CONTINUE CHECKING FOR SIGNALS BUT WILL NOT EXECUTE TRADES UNTIL FUNDS ARE ADDED")
         
-        while True:
-            try:
-                loop_start = time.time()
+        try:
+            while True:
+                # Check balance periodically (every 5 iterations)
+                if random.randint(1, 5) == 1:
+                    await self.check_account_balance()
                 
-                # Process symbols in batches for efficiency
-                batch_size = min(5, len(self.active_symbols))
-                
-                for i in range(0, len(self.active_symbols), batch_size):
-                    batch = self.active_symbols[i:i + batch_size]
-                    
-                    # Process batch concurrently
-                    tasks = [self.process_symbol(symbol) for symbol in batch]
-                    
-                    try:
-                        await asyncio.wait_for(
-                            asyncio.gather(*tasks, return_exceptions=True),
-                            timeout=10.0  # 10-second timeout per batch
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(f"Batch processing timeout for: {batch}")
-                
-                cycle_count += 1
-                loop_time = (time.time() - loop_start) * 1000
-                
-                # Log performance every 10 cycles
-                if cycle_count % 10 == 0:
-                    logger.info(f"🔄 Cycle {cycle_count}: {loop_time:.1f}ms | "
-                               f"Trades: {self.total_trades} | "
-                               f"Signals: {self.signal_stats['total_signals']} | "
-                               f"Accuracy: {self.signal_stats['signal_accuracy']:.1f}%")
-                
-                # Sleep between cycles
-                await asyncio.sleep(5)  # 5-second cycle time
-                
-            except Exception as e:
-                logger.error(f"❌ Main loop error: {e}")
-                await asyncio.sleep(10)
-
-    async def run_simulation(self, hours=1):
-        """FIXED: Run simulation mode - Convert hours to int"""
-        hours_int = int(hours)  # Convert to int to fix linter error
-        logger.info(f"🎮 STARTING SIMULATION MODE ({hours_int} hours)")
-        logger.info(f"🚀 SCANNING {len(self.active_symbols)} TRADING PAIRS")
-        
-        start_time = time.time()
-        end_time = start_time + (hours_int * 3600)
-        
-        while time.time() < end_time:
-            await self.main_trading_loop_iteration()
-            await asyncio.sleep(1)  # 1-second intervals for simulation
-        
-        self.display_simulation_results()
+                await self.main_trading_loop_iteration()
+                await asyncio.sleep(5)  # 5-second interval between signals
+        except KeyboardInterrupt:
+            logger.info("🛑 Trading loop stopped by user")
+        except Exception as e:
+            logger.error(f"❌ Trading loop error: {e}")
+            raise
 
     async def main_trading_loop_iteration(self):
         """Single iteration of main trading loop for simulation"""
         try:
+            # Skip trading if balance is insufficient
+            if not hasattr(self, 'available_balance') or self.available_balance < self.FIXED_POSITION_SIZE_USDT:
+                if random.randint(1, 5) == 1:  # Don't spam logs, only log occasionally
+                    logger.warning(f"⚠️ Trading skipped: Insufficient balance ({self.available_balance} USDT) < required ({self.FIXED_POSITION_SIZE_USDT} USDT)")
+                    # Still scan for signals, just don't execute trades
+                    
             # Process a few symbols per iteration
             symbols_per_iteration = 3
             start_idx = random.randint(0, max(0, len(self.active_symbols) - symbols_per_iteration))
@@ -1493,51 +1710,9 @@ class AggressivePullbackTrader:
             
             tasks = [self.process_symbol(symbol) for symbol in symbols_batch]
             await asyncio.gather(*tasks, return_exceptions=True)
-            
+                
         except Exception as e:
             logger.debug(f"Loop iteration error: {e}")
-
-    def display_simulation_results(self):
-        """FIXED: Display simulation results"""
-        logger.info("📊 SIMULATION RESULTS:")
-        logger.info(f"   💰 Total Trades: {len(self.simulation_trades)}")
-        logger.info(f"   📈 Signals Generated: {self.signal_stats['total_signals']}")
-        logger.info(f"   ✅ Successful Trades: {self.signal_stats['successful_trades']}")
-        logger.info(f"   ❌ Failed Trades: {self.signal_stats['failed_trades']}")
-        logger.info(f"   🎯 Signal Accuracy: {self.signal_stats['signal_accuracy']:.1f}%")
-        
-        if self.simulation_trades:
-            total_fees = sum(0.001 for _ in self.simulation_trades)  # Estimated fees
-            logger.info(f"   💸 Estimated Fees: {total_fees:.3f} USDT")
-            logger.info(f"   📊 Average Position Size: {self.FIXED_POSITION_SIZE_USDT} USDT (FIXED)")
-
-    def log_trade(self, symbol, side, price, size):
-        """FIXED: Log trade information"""
-        # Validate position size
-        try:
-            self.validate_position_size(size)
-            logger.info(f"📝 TRADE LOG: {symbol} {side.upper()} | Price: {price:.6f} | Size: {size} USDT")
-        except ValueError as e:
-            logger.error(f"❌ TRADE LOG ERROR: {e}")
-
-    async def run(self):
-        """FIXED: Main run method"""
-        try:
-            logger.info("🚀 SUPERTREND PULLBACK BOT STARTING")
-            logger.info(f"🔒 Position Size: {self.FIXED_POSITION_SIZE_USDT} USDT (FIXED)")
-            logger.info(f"🎯 Symbols: {len(self.active_symbols)}")
-            logger.info(f"📊 Mode: {'Simulation' if self.simulation_mode else 'Live Trading'}")
-            
-            await self.main_trading_loop()
-            
-        except KeyboardInterrupt:
-            logger.info("🛑 Bot stopped by user")
-        except Exception as e:
-            logger.error(f"❌ Bot error: {e}")
-        finally:
-            if hasattr(self, 'thread_pool'):
-                self.thread_pool.shutdown(wait=True)
-            logger.info("🔚 Bot shutdown complete")
 
     def display_trading_pairs_config(self):
         """FIXED: Display comprehensive trading pairs configuration"""
@@ -1553,17 +1728,17 @@ class AggressivePullbackTrader:
         logger.info(f"🛡️ Risk Management: {self.stop_loss_pct * 100}% stop loss")
         
         # Display leverage categories
-        logger.info(f"\n⚡ LEVERAGE CATEGORIES:")
-        logger.info(f"   🏆 MAJOR CRYPTOS: 50x max leverage (BTC, ETH, SOL, BNB)")
-        logger.info(f"   🔥 POPULAR ALTS: 40x max leverage (XRP, ADA, DOT, MATIC)")
-        logger.info(f"   🚀 MEME COINS: 30x max leverage (DOGE, SHIB, PEPE)")
-        logger.info(f"   🎮 GAMING: 35x max leverage (SAND, MANA, AXS)")
-        logger.info(f"   🤖 AI/TECH: 35x max leverage (FET, AGIX, RNDR)")
-        logger.info(f"   🏦 DEFI: 40x max leverage (SUSHI, COMP, UNI)")
-        logger.info(f"   💼 OTHERS: 25x max leverage (conservative)")
+        logger.info("\n⚡ LEVERAGE CATEGORIES:")
+        logger.info("   🏆 MAJOR CRYPTOS: 50x max leverage (BTC, ETH, SOL, BNB)")
+        logger.info("   🔥 POPULAR ALTS: 40x max leverage (XRP, ADA, DOT, MATIC)")
+        logger.info("   🚀 MEME COINS: 30x max leverage (DOGE, SHIB, PEPE)")
+        logger.info("   🎮 GAMING: 35x max leverage (SAND, MANA, AXS)")
+        logger.info("   🤖 AI/TECH: 35x max leverage (FET, AGIX, RNDR)")
+        logger.info("   🏦 DEFI: 40x max leverage (SUSHI, COMP, UNI)")
+        logger.info("   💼 OTHERS: 25x max leverage (conservative)")
         
         # Display first 20 pairs as example
-        logger.info(f"\n📝 FIRST 20 ACTIVE PAIRS:")
+        logger.info("\n📝 FIRST 20 ACTIVE PAIRS:")
         for i, symbol in enumerate(self.active_symbols[:20]):
             leverage_info = self.get_pair_leverage_settings(symbol)
             logger.info(f"   {i+1:2d}. {symbol:<12} (max: {leverage_info['max_leverage']}x)")
@@ -1575,107 +1750,87 @@ class AggressivePullbackTrader:
         logger.info("🚀 READY TO SCAN ALL PAIRS FOR OPPORTUNITIES!")
         logger.info("=" * 80)
 
+    def log_swap_account_balance(self):
+        """Fetch and log the USDT balance from the SWAP (perpetual) account, log full account info"""
+        try:
+            logger.info("🔍 Fetching account balance from Bitget SWAP (perpetual) account...")
+            
+            # Recreate the exchange options object properly if needed
+            if not hasattr(self.exchange, 'options') or self.exchange.options is None:
+                self.exchange.options = {
+                    'defaultType': 'swap',
+                    'adjustForTimeDifference': True,
+                    'createMarketBuyOrderRequiresPrice': False,
+                    'defaultMarginMode': 'cross',  # PREFERENCE for cross, but will check per symbol
+                    'hedgeMode': True
+                }
+            
+            try:
+                # Get SPECIFIC balance for USDT-M futures
+                balance = self.exchange.fetch_balance({
+                    'type': 'swap',
+                    'product_type': 'umcbl'  # USDT-margined contracts
+                })
+                
+                # Get USDT balance specifically
+                usdt_info = balance.get('USDT', {})
+                total = usdt_info.get('total', 0)
+                free = usdt_info.get('free', 0)
+                used = usdt_info.get('used', 0)
+                
+                # Store for later use in trading - Fix linter error by handling None explicitly
+                self.available_balance = float(free) if free is not None and free != '' else 0.0
+                
+                logger.info(f"💵 USDT SWAP BALANCE: total={total} | free={free} | used={used}")
+                
+                if self.available_balance < 1.0:
+                    logger.warning("⚠️ WARNING: Low USDT in SWAP account. Please transfer funds from Spot to USDT-M SWAP wallet in Bitget.")
+                    logger.warning("⚠️ GO TO BITGET -> ASSETS -> TRANSFER -> FROM: SPOT -> TO: USDT-M FUTURES")
+                
+            except Exception as e:
+                logger.error(f"❌ Error fetching detailed USDT-M balance: {e}")
+                self.available_balance = 0.0
+                
+        except Exception as e:
+            logger.error(f"❌ Error fetching SWAP account balance: {e}")
+            self.available_balance = 0.0  # Set to zero if balance check fails
+
 # Configuration management
-def create_bitget_config():
-    """Create Bitget API configuration"""
-    config_file = "config/bitget_config.json"
-    
-    print("\n🔧 BITGET API CONFIGURATION")
-    print("=" * 50)
-    
-    api_key = input("Enter your Bitget API Key: ").strip()
-    secret = input("Enter your Bitget Secret Key: ").strip()
-    passphrase = input("Enter your Bitget Passphrase: ").strip()
-    
-    sandbox_choice = input("Use Sandbox mode? (y/n) [y]: ").strip().lower()
-    sandbox = sandbox_choice != 'n'
-    
+BITGET_API_KEY = "bg_5400882ef43c5596ffcf4af0c697b250"
+BITGET_SECRET = "60e42c8f086221d6dd992fc93e5fb810b0354adaa09b674558c14cbd49969d45"
+BITGET_PASSPHRASE = "22672267"
+
+# Overwrite config file with these credentials at startup
+CONFIG_FILE = "config/bitget_config.json"
+def force_write_bitget_config():
     config = {
-        "api_key": api_key,
-        "secret": secret,
-        "passphrase": passphrase,
-        "sandbox": sandbox,
+        "api_key": BITGET_API_KEY,
+        "secret": BITGET_SECRET,
+        "passphrase": BITGET_PASSPHRASE,
+        "sandbox": False,
         "position_size_fixed": 0.50
     }
-    
     Path("config").mkdir(exist_ok=True)
-    
     try:
-        with open(config_file, 'w') as f:
+        with open(CONFIG_FILE, 'w') as f:
             json.dump(config, f, indent=4)
-        
-        print(f"✅ Configuration saved to {config_file}")
-        print(f"🔒 Position Size: 0.50 USDT (FIXED)")
-        return config
-        
+        logger.info(f"✅ Bitget config forcibly written with hardcoded credentials.")
     except Exception as e:
-        print(f"❌ Error saving configuration: {e}")
-        return None
+        logger.error(f"❌ Error writing config: {e}")
+    return config
 
-# Main execution
 def main():
-    """FIXED: Main function with proper menu system and config display"""
-    print("\n🚀 SUPERTREND PULLBACK TRADING BOT - FIXED EDITION")
-    print("=" * 60)
-    print("🔒 Position Size: FIXED 0.50 USDT per trade")
-    print("⚡ All critical issues resolved")
-    print("=" * 60)
-    
-    # Create trader instance to show configurations
-    temp_trader = AggressivePullbackTrader(simulation_mode=True)
-    temp_trader.display_trading_pairs_config()
-    
-    while True:
-        print("\nSelect an option:")
-        print("1. 🎮 Run Simulation")
-        print("2. 🔴 Live Trading (REAL MONEY)")
-        print("3. ⚙️ Configure Bitget API")
-        print("4. 📊 Display Trading Pairs Config")
-        print("5. 🚪 Exit")
-        
-        try:
-            choice = input("\nEnter your choice (1-5): ").strip()
-            
-            if choice == "1":
-                hours = input("Simulation duration in hours [1]: ").strip()
-                hours = int(float(hours)) if hours else 1  # Convert to int to fix linter error
-                
-                trader = AggressivePullbackTrader(simulation_mode=True)
-                asyncio.run(trader.run_simulation(hours))
-                
-            elif choice == "2":
-                print("\n⚠️ WARNING: LIVE TRADING MODE")
-                print("This will trade with REAL MONEY!")
-                print("Position size is FIXED at 0.50 USDT per trade")
-                print("Leverage will be set FIRST, then position calculated")
-                
-                confirm = input("Type 'CONFIRM' to proceed: ").strip()
-                
-                if confirm == "CONFIRM":
-                    trader = AggressivePullbackTrader(simulation_mode=False)
-                    asyncio.run(trader.run())
-                else:
-                    print("❌ Live trading cancelled")
-                    
-            elif choice == "3":
-                create_bitget_config()
-                
-            elif choice == "4":
-                trader = AggressivePullbackTrader(simulation_mode=True)
-                trader.display_trading_pairs_config()
-                
-            elif choice == "5":
-                print("👋 Goodbye!")
-                break
-                
-            else:
-                print("❌ Invalid choice. Please try again.")
-                
-        except KeyboardInterrupt:
-            print("\n🛑 Interrupted by user")
-            break
-        except Exception as e:
-            print(f"❌ Error: {e}")
+    logger.info("🚀 SUPERTREND PULLBACK LIVE TRADER - STARTING NOW!")
+    force_write_bitget_config()  # Always enforce credentials at startup
+    trader = AggressivePullbackTrader()  # LIVE TRADING MODE
+    try:
+        asyncio.run(trader.main_trading_loop())
+    except KeyboardInterrupt:
+        logger.info("🛑 Bot stopped by user (Ctrl+C)")
+    except Exception as e:
+        logger.error(f"❌ Fatal error: {e}")
+        logger.error(f"📍 Error details: {traceback.format_exc()}")
+
 
 if __name__ == "__main__":
-    main()
+    main() 

@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.2] - 2025-05-28
+
+### Fixed
+- Enhanced `supertrend_pullback_live.py` signal generation with comprehensive error handling for all SuperZ analyzer calls, preventing unexpected keyword argument errors.
+- Improved `analyze_pullbacks_after_signals` method in `super_z_pullback_analyzer.py` with proper initialization of potentially unbound variables and more robust error handling.
+- Added full error tracebacks to log files for better debugging of complex issues.
+- Enhanced `process_symbol_lightning_fast` with additional error protection to prevent crashes when handling unexpected parameters.
+- Fixed handling of empty DataFrames in all analyzer functions to prevent index access errors.
+
+## [4.0.1] - 2025-05-27
+
+### Fixed
+- Fixed `SuperZPullbackAnalyzer.detect_signals()` to properly handle the deprecated `loosen_level` parameter which was causing TypeError exceptions for multiple trading pairs.
+- Enhanced error handling in `process_symbol_lightning_fast()` to provide better fallback mechanisms when parameter errors occur.
+- Improved error logging for API requests and data processing.
+
 ## [4.0.0] - 2025-01-27
 
 ### Added
