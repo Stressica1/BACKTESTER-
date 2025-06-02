@@ -1,6 +1,7 @@
 {
-    "api_key": "bg_33b25387b50e7f874c18ddf34f5cbb14",
-    "secret": "4b3cab211d44a155c5cc63dd025fad43025d09155ee6eef3769ef2f6f85c9715",
+    "api_key": "bg_5400882ef43c5596ffcf4af0c697b250",
+    "secret": "60e42c8f086221d6dd992fc93e5fb810b0354adaa09b674558c14cbd49969d45",
     "passphrase": "22672267",
-    "sandbox": false
+    "sandbox": false,
+    "position_size_fixed": 0.5
 }

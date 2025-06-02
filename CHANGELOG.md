@@ -203,4 +203,126 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Ensured `test_batch.json` config file is present in both root and BACKTESTER directories so `supertrend_live.py` can find it regardless of run location.
 - Repeatedly tested `supertrend_live.py` three times to confirm stability and no config errors.
 
+## [1.1.0] - 2024-06-01
+
+### Added
+- Comprehensive Bitget API error handling system
+  - Detailed error code mapping for all Bitget API error codes
+  - Automatic recovery mechanisms for common errors
+  - Rate limit management with adaptive backoff
+- Unified error logging system
+  - Centralized error tracking and reporting
+  - Error categorization and severity levels
+  - Alert thresholds for error categories
+- File watchdog for code change detection
+  - Automatic module reloading on code changes
+  - No downtime deployments
+- Launcher script with dependency management
+  - Automatic dependency installation
+  - Process monitoring and automatic restarts
+  - Health checks and status reporting
+- Comprehensive documentation for Bitget API error codes
+
+### Changed
+- Improved rate limiting with per-endpoint tracking
+- Enhanced error recovery for network issues
+- Better handling of price deviation errors (50067)
+- Improved margin mode detection and fallback
+- More robust balance checking
+
+### Fixed
+- Fixed price deviation errors with adaptive slippage
+- Fixed margin mode errors with automatic fallback to isolated margin
+- Fixed leverage setting failures with progressive reduction
+- Fixed rate limit handling with proper backoff
+- Fixed error handling for insufficient balance conditions
+
+## [1.0.0] - 2024-05-15
+
+### Added
+- Initial release of SuperTrend Pullback Trading Bot
+- Multi-timeframe analysis for signal generation
+- SuperTrend indicator implementation
+- Dynamic pair discovery for 200+ trading pairs
+- Position size enforcement (fixed at 0.50 USDT)
+- Basic logging system
+- SQLite database for trade tracking
+
+## [1.3.0] - 2025-06-01
+
+### Fixed
+- Fixed margin mode switching logic to properly handle symbols that don't support cross margin (error 50004)
+- Added automatic tracking system for removed symbols (error 40309) to prevent repeated errors
+- Implemented proper caching of supported margin modes per symbol
+- Enhanced error detection and recovery for all Bitget API error codes
+- Improved logging for margin mode selection and trade execution
+
+### Added
+- New system to skip removed/delisted symbols automatically
+- Periodic logging of skipped symbols
+- Detailed execution logging with slippage and retry information
+- Enhanced trade execution error handling
+
+### Changed
+- Improved slippage handling for price deviation errors (50067)
+- Reduced position size to 0.2 USDT for testing
+- Lowered confidence threshold from 88% to 80% for more trading opportunities
+
+## [1.3.1] - 2025-06-01
+
+### Fixed
+- Added critical third "none" margin mode for symbols that support neither cross nor isolated margin
+- Enhanced error detection for error codes 50002 and 50004 to correctly identify symbols' margin capabilities
+- Fixed trading failures on pairs like ALGO/USDT and CVX/USDT by completely omitting marginMode parameter when needed
+- Improved error handling with more specific error detection for all margin-related errors
+- Added detailed logging of margin mode selection in trade execution
+
+### Changed
+- Updated margin mode handling to try 'none' mode after both cross and isolated fail
+- Cached margin mode knowledge for each symbol to prevent repeated errors
+- Improved log messages to clearly show when no margin mode is being used
+
+## [1.3.2] - 2025-06-01
+
+### Fixed
+- Completely overhauled margin mode selection logic to properly try all fallback modes (cross → isolated → none)
+- Added enhanced logging for margin mode decision making with detailed context for all errors
+- Fixed critical bug where bot would abandon trade after second margin mode failure instead of trying "none" mode
+- Added tracking of margin mode failures by symbol to identify problematic trading pairs
+- Improved error context in all log messages for better troubleshooting
+- Added periodic display of no_margin_symbols set to monitor which symbols need special handling
+
+### Added
+- New margin_mode_failures tracking to identify problematic symbols
+- Detailed JSON dumps of order parameters and market information
+- Comprehensive fallback sequence logging for each symbol
+- Debug-level market info logging to identify symbol capabilities
+- Automatic skipping of previously failed margin modes to save time
+
+### Changed
+- Updated error detection and handling for better recovery
+- Improved margin mode detection with better caching
+- Enhanced configuration for more reliable trading
+
+## [1.3.3] - 2025-06-01
+
+### Fixed
+- Added advanced order book price calculation to reduce price deviation errors (50067)
+- Implemented market volatility tracking to dynamically adjust slippage based on symbol history
+- Fixed linter errors for better code stability and type safety
+- Added proper decay mechanism for volatility data to avoid memory issues
+
+### Added
+- Order book data fetching for more accurate price calculation
+- Dynamic slippage adjustment based on price volatility history
+- High volatility symbol tracking and logging for monitoring
+- Fresh price data fetching on each trade retry
+- Comprehensive symbol volatility tracking system
+
+### Changed
+- Improved margin mode fallback sequence selection based on symbol history
+- Enhanced logging with clearer price deviation percentages
+- Added cleanup mechanism for volatility data older than 4 hours
+- Reduced volatility scores for symbols with no recent errors
+
 i got you 

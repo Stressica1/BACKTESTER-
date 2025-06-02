@@ -270,7 +270,7 @@ def test_scanner(top_n=20, suppress_ohlcv=False, exchange_id='bitget'):
 
     end_time = time.time()
     logger.info(f"Scanner test finished in {end_time - start_time:.2f} seconds.")
-    
+
     # Minimal OHLCV fetch for a single pair (if not suppressed)
     if not suppress_ohlcv:
         logger.info("\nFetching minimal OHLCV data for BTC/USDT:USDT as a final check...")
@@ -279,13 +279,13 @@ def test_scanner(top_n=20, suppress_ohlcv=False, exchange_id='bitget'):
         api_secret_val = os.getenv('BITGET_API_SECRET', '')
         passphrase_val = os.getenv('BITGET_PASSPHRASE', '')
 
-        exchange = ccxt.bitget({
+    exchange = ccxt.bitget({
             'apiKey': api_key_val,
             'secret': api_secret_val,
             'password': passphrase_val,
-            'enableRateLimit': True,
-            'options': {'defaultType': 'swap'}
-        })
+        'enableRateLimit': True,
+        'options': {'defaultType': 'swap'}
+    })
         try:
             ohlcv = exchange.fetch_ohlcv('BTC/USDT:USDT', timeframe='1m', limit=1)
             if ohlcv:

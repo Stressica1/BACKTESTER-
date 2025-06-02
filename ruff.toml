@@ -1,0 +1,11 @@
+select = ["E", "F", "W", "I", "C90", "N", "UP", "B", "A"]
+ignore = []
+line-length = 100
+target-version = "py38"
+
+[per-file-ignores]
+"__init__.py" = ["E402", "F401"]
+"**/tests/*" = ["E402"]
+
+[isort]
+known-third-party = ["ccxt", "pandas", "numpy", "asyncio", "websockets", "aiohttp"] 

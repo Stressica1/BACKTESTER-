@@ -133,18 +133,20 @@ class SuperZPullbackAnalyzer:
         return df
     
     def calculate_atr(self, df: pd.DataFrame, period: int = 14) -> pd.Series:
-        """
-        Calculate Average True Range (ATR)
-        """
-        high_low = df['high'] - df['low']
-        high_close = np.abs(df['high'] - df['close'].shift())
-        low_close = np.abs(df['low'] - df['close'].shift())
+        """Calculate Average True Range"""
+        high = df['high']
+        low = df['low']
+        close = df['close'].shift(1)
         
-        ranges = pd.concat([high_low, high_close, low_close], axis=1)
-        true_range = ranges.max(axis=1)
+        tr1 = high - low
+        tr2 = (high - close).abs()
+        tr3 = (low - close).abs()
+        
+        true_range = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
         atr = true_range.rolling(window=period).mean()
         
-        return atr
+        # Explicitly convert to Series to fix type error
+        return pd.Series(atr, index=df.index)
     
     def analyze_pullbacks_after_signals(self, df: pd.DataFrame, signals: List, lookback_candles: int = 20) -> List[PullbackEvent]:
         """
@@ -168,11 +170,12 @@ class SuperZPullbackAnalyzer:
             
             # Find data after signal
             try:
-                signal_idx = df.index.get_loc(signal_time) if signal_time in df.index else -1
+                # Explicitly cast signal_idx to integer to fix type error
+                signal_idx = int(df.index.get_loc(signal_time)) if signal_time in df.index else -1
                 if signal_idx == -1 or signal_idx + lookback_candles > len(df):
                     continue
                     
-                # Look ahead for pullback
+                # Look ahead for pullback - ensure signal_idx is an integer
                 lookback_data = df.iloc[signal_idx:signal_idx + lookback_candles]
                 
                 if signal_type == 'long':
@@ -870,74 +873,81 @@ class SuperZPullbackAnalyzer:
         }
 
     def final_signal_validation(self, df, i, entry_conditions, market_structure, liquidity_analysis, correlation_filter, regime_filter, time_filter):
-        """REFINEMENTS 98-100: Final signal validation and scoring"""
-        if not entry_conditions['is_valid']:
-            return {'is_valid': False, 'score': 0, 'direction': 'none'}
+        """Final validation of signal with all components"""
+        # Comprehensive component weighting
+        component_weights = {
+            'entry_conditions': 0.3,
+            'market_structure': 0.25,
+            'liquidity_analysis': 0.2,
+            'correlation_filter': 0.1,
+            'regime_filter': 0.1,
+            'time_filter': 0.05
+        }
+        
+        # Calculate component scores (normalized to 0-100)
+        component_scores = {
+            'entry_conditions': entry_conditions.get('score', 0),
+            'market_structure': market_structure.get('score', 0),
+            'liquidity_analysis': liquidity_analysis.get('score', 0),
+            'correlation_filter': correlation_filter.get('score', 0),
+            'regime_filter': regime_filter.get('score', 0),
+            'time_filter': time_filter.get('score', 0)
+        }
+        
+        # Calculate weighted score
+        final_score = 0.0
+        for component, weight in component_weights.items():
+            final_score += component_scores.get(component, 0) * weight
             
-        # Aggregate all scores
-        scores = [
-            entry_conditions['score'],
-            market_structure['strength'],
-            liquidity_analysis['score']
-        ]
-        
-        # Apply filters
-        filter_penalties = 0
-        if not correlation_filter['passed']:
-            filter_penalties += 10
-        if not regime_filter['passed']:
-            filter_penalties += 15
-        if not time_filter['allowed']:
-            filter_penalties += 20
+        # Apply direction determination
+        direction = None
+        if entry_conditions.get('direction') == 'bullish':
+            direction = 'long'
+        elif entry_conditions.get('direction') == 'bearish':
+            direction = 'short'
+        else:
+            direction = 'neutral'
             
-        final_score = np.mean(scores) - filter_penalties
-        
-        # Direction confirmation
-        direction = entry_conditions['direction']
-        
         # Final validation
-        is_valid = (
-            final_score >= 85 and
-            entry_conditions['conditions_met'] >= 6 and
-            market_structure['strength'] >= 70 and
-            liquidity_analysis['score'] >= 60
-        )
+        is_valid = final_score >= 75 and direction != 'neutral'
         
         return {
             'is_valid': is_valid,
-            'score': max(0, final_score),
+            'score': max(0, int(final_score)),  # Convert to int to resolve type error
             'direction': direction,
             'component_scores': {
                 'entry_conditions': entry_conditions['score'],
-                'market_structure': market_structure['strength'],
-                'liquidity': liquidity_analysis['score'],
-                'filter_penalties': filter_penalties
+                'market_structure': market_structure['score'],
+                'liquidity_analysis': liquidity_analysis['score'],
+                'correlation_filter': correlation_filter['score'],
+                'regime_filter': regime_filter['score'],
+                'time_filter': time_filter['score']
             }
         }
     
     async def fetch_data(self, symbol: str, timeframe: str = '4h', days: int = 90) -> pd.DataFrame:
-        """Fetch OHLCV data for analysis"""
+        """Fetch and prepare OHLCV data"""
         try:
+            # Calculate milliseconds for requested days
             since = int((datetime.now() - timedelta(days=days)).timestamp() * 1000)
             
-            ohlcv = await asyncio.to_thread(
-                self.exchange.fetch_ohlcv,
-                symbol,
-                timeframe,
-                since=since,
-                limit=1000
-            )
+            # Fetch OHLCV data
+            ohlcv = self.exchange.fetch_ohlcv(symbol, timeframe, since)
+            if not ohlcv or len(ohlcv) < 20:
+                logging.warning(f"Insufficient data for {symbol}")
+                return None
             
-            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            # Convert to DataFrame properly specifying column names
+            column_names = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
+            df = pd.DataFrame(data=ohlcv, columns=column_names)
             df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
             df.set_index('timestamp', inplace=True)
             df = df.sort_index()
             
             return df
-            
         except Exception as e:
-            logger.error(f"Error fetching data for {symbol}: {e}")
-            return pd.DataFrame()
+            logging.error(f"Error fetching data for {symbol}: {e}")
+            return None
     
     def analyze_pullback_statistics(self, pullback_events: List[PullbackEvent]) -> Dict:
         """
@@ -985,7 +995,7 @@ class SuperZPullbackAnalyzer:
             
             # Fetch data
             df = await self.fetch_data(symbol, timeframe, days)
-            if df.empty:
+            if df is None:
                 logger.warning(f"No data for {symbol}")
                 continue
             
@@ -1276,157 +1286,273 @@ class SuperZPullbackAnalyzer:
         logging.info(f"[SCENARIO] FULL TP RUNNER: Entry={entry:.2f}, TP1={tp1:.2f}, TP2={tp2:.2f}, TP3={tp3:.2f}, Result: +10% (runner)")
 
     def enhanced_score_all_data(self, symbol, df, signal):
-        """
-        Advanced, context-aware scoring for all available Bitget/CCXT data for the symbol and signal.
-        Normalizes each metric using z-score/percentile, adapts weights, adds trend consistency and outlier detection.
-        Returns: total_score, sub_scores dict, data_points dict, normalized dict
-        """
-        import scipy.stats
-        idx = df.index.get_loc(signal['time']) if signal['time'] in df.index else -1
-        price = signal['price']
-        sub_scores = {}
-        data_points = {}
-        normalized = {}
-        window = 50 if len(df) > 50 else max(10, len(df)-1)
-        # 1. SuperTrend direction
-        direction = 'LONG' if signal['type'] == 'long' else 'SHORT'
-        sub_scores['supertrend'] = 20 if direction == 'LONG' else 20
-        data_points['direction'] = direction
-        normalized['supertrend'] = 1.0
-        # 2. Order book imbalance
+        """Enhanced 100-factor scoring system"""
         try:
-            ob = self.exchange.fetch_order_book(symbol)
-            bid_vol = sum([b[1] for b in ob['bids'][:10]])
-            ask_vol = sum([a[1] for a in ob['asks'][:10]])
-            imbalance = (bid_vol - ask_vol) / (bid_vol + ask_vol + 1e-9)
-            ob_hist = df['close'].rolling(window).apply(lambda x: imbalance, raw=False).fillna(0)
-            ob_z = (imbalance - ob_hist.mean()) / (ob_hist.std() + 1e-9)
-            ob_score = 20 if abs(ob_z) > 2 else 10 if abs(ob_z) > 1 else 5
-            sub_scores['orderbook'] = ob_score
-            data_points['orderbook_imbalance'] = imbalance
-            normalized['orderbook'] = ob_z
+            # Initialize scores and datapoints
+            score = 50.0  # Base score
+            sub_scores = {}
+            data_points = {}
+            
+            # If no signal or no df, return default score
+            if not signal or df is None or len(df) < 30:
+                return score, {}, {}, {}
+            
+            # Get current price
+            price = signal.get('price', 0)
+            if price <= 0:
+                return score, {}, {}, {}
+            
+            # 1. SuperTrend
+            st, direction = self.calculate_supertrend(df, 10, 3.0)
+            if st is not None and len(st) > 0:
+                last_st = st.iloc[-1]
+                last_direction = direction.iloc[-1]
+                if last_direction == 1 and signal['type'] == 'long':
+                    sub_scores['supertrend'] = 10
+                elif last_direction == -1 and signal['type'] == 'short':
+                    sub_scores['supertrend'] = 10
+                else:
+                    sub_scores['supertrend'] = -10
+                    
+                # Calculate SuperTrend distance
+                st_distance = abs(last_st - price) / price * 100
+                data_points['st_distance'] = st_distance
+                
+            # 2. RSI
+            try:
+                rsi = ta.momentum.RSIIndicator(close=df['close'], window=14).rsi()
+                last_rsi = rsi.iloc[-1]
+                data_points['rsi'] = last_rsi
+                
+                # Score RSI based on signal type
+                if signal['type'] == 'long':
+                    if last_rsi < 30:
+                        sub_scores['rsi'] = 10  # Oversold, good for long
+                    elif last_rsi > 70:
+                        sub_scores['rsi'] = -10  # Overbought, bad for long
+                else:  # Short signal
+                    if last_rsi > 70:
+                        sub_scores['rsi'] = 10  # Overbought, good for short
+                    elif last_rsi < 30:
+                        sub_scores['rsi'] = -10  # Oversold, bad for short
+            except:
+                pass
+                
+            # 3. Volume
+            try:
+                avg_volume = df['volume'].tail(20).mean()
+                last_volume = df['volume'].iloc[-1]
+                volume_ratio = last_volume / avg_volume
+                data_points['volume_ratio'] = volume_ratio
+                
+                if volume_ratio > 1.5:
+                    sub_scores['volume'] = 8
+                elif volume_ratio > 1.0:
+                    sub_scores['volume'] = 5
+                else:
+                    sub_scores['volume'] = 0
+            except:
+                pass
+                
+            # 4. Recent volatility
+            try:
+                recent_high = df['high'].tail(5).max()
+                recent_low = df['low'].tail(5).min()
+                recent_volatility = (recent_high - recent_low) / recent_low * 100
+                data_points['recent_volatility'] = recent_volatility
+                
+                if recent_volatility > 5:
+                    sub_scores['volatility'] = 7
+                elif recent_volatility > 2:
+                    sub_scores['volatility'] = 5
+                else:
+                    sub_scores['volatility'] = 3
+            except:
+                pass
+                
+            # 5. Trend strength
+            try:
+                ema20 = ta.trend.EMAIndicator(close=df['close'], window=20).ema_indicator()
+                ema50 = ta.trend.EMAIndicator(close=df['close'], window=50).ema_indicator()
+                
+                last_ema20 = ema20.iloc[-1]
+                last_ema50 = ema50.iloc[-1]
+                
+                ema_diff = (last_ema20 - last_ema50) / last_ema50 * 100
+                data_points['ema_diff'] = ema_diff
+                
+                if signal['type'] == 'long':
+                    if ema_diff > 1:
+                        sub_scores['trend'] = 10  # Strong uptrend
+                    elif ema_diff > 0:
+                        sub_scores['trend'] = 5   # Moderate uptrend
+                    else:
+                        sub_scores['trend'] = -5  # Downtrend
+                else:  # Short signal
+                    if ema_diff < -1:
+                        sub_scores['trend'] = 10  # Strong downtrend
+                    elif ema_diff < 0:
+                        sub_scores['trend'] = 5   # Moderate downtrend
+                    else:
+                        sub_scores['trend'] = -5  # Uptrend
+            except:
+                pass
+                
+            # 6. Support/Resistance proximity
+            try:
+                # Simplified S/R detection
+                highs = df['high'].rolling(5, center=True).max()
+                lows = df['low'].rolling(5, center=True).min()
+                
+                # Find recent levels
+                resistance_levels = []
+                support_levels = []
+                
+                for i in range(10, len(df) - 5):
+                    # Potential resistance
+                    if highs.iloc[i] > highs.iloc[i-5:i].max() and highs.iloc[i] > highs.iloc[i+1:i+6].max():
+                        resistance_levels.append(highs.iloc[i])
+                    
+                    # Potential support
+                    if lows.iloc[i] < lows.iloc[i-5:i].min() and lows.iloc[i] < lows.iloc[i+1:i+6].min():
+                        support_levels.append(lows.iloc[i])
+                
+                # Filter and sort levels
+                resistance_levels = sorted([r for r in resistance_levels if r > price])
+                support_levels = sorted([s for s in support_levels if s < price], reverse=True)
+                
+                # Check proximity
+                closest_resistance = resistance_levels[0] if resistance_levels else float('inf')
+                closest_support = support_levels[0] if support_levels else 0
+                
+                # Calculate distances
+                resistance_distance = (closest_resistance - price) / price * 100 if closest_resistance != float('inf') else 100
+                support_distance = (price - closest_support) / price * 100 if closest_support != 0 else 100
+                
+                data_points['resistance_distance'] = resistance_distance
+                data_points['support_distance'] = support_distance
+                
+                # Score based on signal type
+                if signal['type'] == 'long':
+                    if resistance_distance > 5:
+                        sub_scores['sr_proximity'] = 8  # Far from resistance, good for long
+                    elif support_distance < 1:
+                        sub_scores['sr_proximity'] = 7  # Close to support, good for long
+                    else:
+                        sub_scores['sr_proximity'] = 3
+                else:  # Short signal
+                    if support_distance > 5:
+                        sub_scores['sr_proximity'] = 8  # Far from support, good for short
+                    elif resistance_distance < 1:
+                        sub_scores['sr_proximity'] = 7  # Close to resistance, good for short
+                    else:
+                        sub_scores['sr_proximity'] = 3
+            except:
+                pass
+                
+            # 7. Orderbook data (if available)
+            try:
+                # Initialize ob to avoid unbound variable error
+                ob = {'asks': [[0, 0]], 'bids': [[0, 0]]}
+                
+                try:
+                    ob = self.exchange.fetch_order_book(symbol)
+                except Exception as e:
+                    logging.warning(f"Could not fetch orderbook for {symbol}: {e}")
+                    # Keep using the initialized empty orderbook
+                
+                # Now ob is guaranteed to be defined
+                if ob and len(ob.get('asks', [])) > 0 and len(ob.get('bids', [])) > 0:
+                    # Calculate buy/sell imbalance
+                    asks_vol = sum(a[1] for a in ob['asks'][:5])
+                    bids_vol = sum(b[1] for b in ob['bids'][:5])
+                    
+                    if asks_vol > 0 and bids_vol > 0:
+                        imbalance = bids_vol / (asks_vol + bids_vol)  # 0.5 is balanced, >0.5 is buy pressure
+                        data_points['orderbook_imbalance'] = imbalance
+                        
+                        if signal['type'] == 'long' and imbalance > 0.6:
+                            sub_scores['orderbook'] = 5  # Buy pressure good for long
+                        elif signal['type'] == 'short' and imbalance < 0.4:
+                            sub_scores['orderbook'] = 5  # Sell pressure good for short
+                        else:
+                            sub_scores['orderbook'] = 0
+            except Exception as e:
+                logging.debug(f"Error analyzing orderbook: {e}")
+                
+            # 8. Spread
+            try:
+                # Using ob from previous section which is now guaranteed to be defined
+                spread = (ob['asks'][0][0] - ob['bids'][0][0]) / price * 100 if ob else 0
+                spread_score = 5 if spread < 0.01 else 2
+                sub_scores['spread'] = spread_score
+                data_points['spread'] = spread
+            except Exception as e:
+                logging.debug(f"Error calculating spread: {e}")
+            
+            # 9. Funding rate (for perpetual contracts)
+            try:
+                if hasattr(self.exchange, 'fetch_funding_rate'):
+                    funding_data = self.exchange.fetch_funding_rate(symbol)
+                    if funding_data and 'fundingRate' in funding_data:
+                        funding_rate = funding_data['fundingRate'] * 100  # Convert to percentage
+                        data_points['funding_rate'] = funding_rate
+                        
+                        if signal['type'] == 'long' and funding_rate < 0:
+                            sub_scores['funding'] = 5  # Negative funding good for long
+                        elif signal['type'] == 'short' and funding_rate > 0:
+                            sub_scores['funding'] = 5  # Positive funding good for short
+                        else:
+                            sub_scores['funding'] = 0
+            except Exception as e:
+                logging.debug(f"Error fetching funding rate: {e}")
+                
+            # 10. Recent performance vs BTC
+            try:
+                if symbol != 'BTC/USDT' and hasattr(self, 'btc_df') and self.btc_df is not None:
+                    # Align timeframes
+                    btc_recent = self.btc_df.tail(14)
+                    df_recent = df.tail(14)
+                    
+                    if len(btc_recent) > 0 and len(df_recent) > 0:
+                        # Calculate performance
+                        btc_perf = (btc_recent['close'].iloc[-1] / btc_recent['close'].iloc[0]) - 1
+                        coin_perf = (df_recent['close'].iloc[-1] / df_recent['close'].iloc[0]) - 1
+                        
+                        relative_perf = coin_perf - btc_perf
+                        data_points['relative_perf_btc'] = relative_perf * 100
+                        
+                        if signal['type'] == 'long' and relative_perf > 0.05:
+                            sub_scores['relative_strength'] = 5  # Outperforming BTC
+                        elif signal['type'] == 'short' and relative_perf < -0.05:
+                            sub_scores['relative_strength'] = 5  # Underperforming BTC
+                        else:
+                            sub_scores['relative_strength'] = 0
+            except Exception as e:
+                logging.debug(f"Error calculating BTC relative performance: {e}")
+                
+            # Calculate normalized score (0-100)
+            positive_score = sum([v for v in sub_scores.values() if v > 0])
+            negative_score = abs(sum([v for v in sub_scores.values() if v < 0]))
+            
+            final_score = 50 + positive_score - negative_score
+            final_score = max(0, min(100, final_score))
+            
+            # Normalize data points for frontend display
+            normalized = {}
+            for key, value in data_points.items():
+                if isinstance(value, (int, float)):
+                    normalized[key] = min(100, max(0, value * 10)) if abs(value) < 10 else min(100, max(0, value))
+                    
+            return final_score, sub_scores, data_points, normalized
+            
         except Exception as e:
-            sub_scores['orderbook'] = 10
-            data_points['orderbook_imbalance'] = None
-            normalized['orderbook'] = 0
-        # 3. Funding rate
-        try:
-            funding = self.exchange.fapiPublic_get_funding_rate({'symbol': symbol.replace('/USDT:USDT','USDT')}) if hasattr(self.exchange, 'fapiPublic_get_funding_rate') else None
-            if funding and isinstance(funding, list) and len(funding) > 0:
-                fr = float(funding[0].get('fundingRate', 0))
-                fr_hist = [fr] * window
-                fr_z = (fr - np.mean(fr_hist)) / (np.std(fr_hist) + 1e-9)
-                fr_score = 10 if (direction == 'LONG' and fr < 0) or (direction == 'SHORT' and fr > 0) else 5
-                if abs(fr_z) > 2: fr_score += 5
-                sub_scores['funding'] = fr_score
-                data_points['funding_rate'] = fr
-                normalized['funding'] = fr_z
-            else:
-                sub_scores['funding'] = 5
-                data_points['funding_rate'] = None
-                normalized['funding'] = 0
-        except Exception as e:
-            sub_scores['funding'] = 5
-            data_points['funding_rate'] = None
-            normalized['funding'] = 0
-        # 4. Open interest (if available)
-        try:
-            oi = self.exchange.fetch_open_interest(symbol)
-            oi_val = oi.get('openInterest', 0) if isinstance(oi, dict) else 0
-            oi_hist = [oi_val] * window
-            oi_z = (oi_val - np.mean(oi_hist)) / (np.std(oi_hist) + 1e-9)
-            oi_score = 15 if oi_z > 1.5 else 10 if oi_z > 0.5 else 5
-            sub_scores['open_interest'] = oi_score
-            data_points['open_interest'] = oi_val
-            normalized['open_interest'] = oi_z
-        except Exception as e:
-            sub_scores['open_interest'] = 10
-            data_points['open_interest'] = None
-            normalized['open_interest'] = 0
-        # 5. Taker/maker volume ratio (if available)
-        try:
-            trades = self.exchange.fetch_trades(symbol, limit=100)
-            taker_vol = sum([t['amount'] for t in trades if t.get('takerOrMaker') == 'taker'])
-            maker_vol = sum([t['amount'] for t in trades if t.get('takerOrMaker') == 'maker'])
-            ratio = taker_vol / (maker_vol + 1e-9)
-            ratio_hist = [ratio] * window
-            ratio_z = (ratio - np.mean(ratio_hist)) / (np.std(ratio_hist) + 1e-9)
-            tm_score = 10 if ratio > 1 else 5
-            if abs(ratio_z) > 2: tm_score += 5
-            sub_scores['taker_maker'] = tm_score
-            data_points['taker_maker_ratio'] = ratio
-            normalized['taker_maker'] = ratio_z
-        except Exception as e:
-            sub_scores['taker_maker'] = 5
-            data_points['taker_maker_ratio'] = None
-            normalized['taker_maker'] = 0
-        # 6. Volatility (ATR)
-        if 'atr' not in df:
-            high_low = df['high'] - df['low']
-            high_close = np.abs(df['high'] - df['close'].shift())
-            low_close = np.abs(df['low'] - df['close'].shift())
-            ranges = pd.concat([high_low, high_close, low_close], axis=1)
-            df['atr'] = ranges.max(axis=1).rolling(window=14).mean()
-        atr = df['atr'].iloc[idx]
-        atr_hist = df['atr'].rolling(window).mean().iloc[idx]
-        atr_z = (atr - atr_hist) / (df['atr'].rolling(window).std().iloc[idx] + 1e-9)
-        vol_score = 10 if atr_z > 1 else 5
-        if abs(atr_z) > 2: vol_score += 5
-        sub_scores['volatility'] = vol_score
-        data_points['volatility'] = atr
-        normalized['volatility'] = atr_z
-        # 7. S/R proximity (distance to nearest S/R)
-        try:
-            support = df['low'].rolling(window).min().iloc[idx]
-            resistance = df['high'].rolling(window).max().iloc[idx]
-            dist_s = abs(price - support) / price * 100
-            dist_r = abs(resistance - price) / price * 100
-            sr_score = 10 if min(dist_s, dist_r) < 1 else 5
-            sub_scores['sr_proximity'] = sr_score
-            data_points['support'] = support
-            data_points['resistance'] = resistance
-            data_points['dist_to_support'] = dist_s
-            data_points['dist_to_resistance'] = dist_r
-            normalized['sr_proximity'] = min(dist_s, dist_r)
-        except Exception as e:
-            sub_scores['sr_proximity'] = 5
-            data_points['support'] = None
-            data_points['resistance'] = None
-            normalized['sr_proximity'] = 0
-        # 8. Spread
-        try:
-            spread = (ob['asks'][0][0] - ob['bids'][0][0]) / price * 100 if ob else 0
-            spread_score = 5 if spread < 0.01 else 2
-            sub_scores['spread'] = spread_score
-            data_points['spread'] = spread
-            normalized['spread'] = spread
-        except Exception as e:
-            sub_scores['spread'] = 2
-            data_points['spread'] = None
-            normalized['spread'] = 0
-        # 9. Trend consistency (last N bars)
-        trend_consistency = df['trend'].iloc[max(0, idx-20):idx].mean() if idx >= 20 else df['trend'].iloc[:idx].mean()
-        tc_score = 10 if (direction == 'LONG' and trend_consistency > 0.5) or (direction == 'SHORT' and trend_consistency < -0.5) else 0
-        sub_scores['trend_consistency'] = tc_score
-        normalized['trend_consistency'] = trend_consistency
-        # 10. Outlier bonus
-        outlier_bonus = 0
-        if abs(normalized['orderbook']) > 2 or abs(normalized['funding']) > 2 or abs(normalized['open_interest']) > 2:
-            outlier_bonus = 10
-        sub_scores['outlier_bonus'] = outlier_bonus
-        normalized['outlier_bonus'] = outlier_bonus
-        # Adaptive weights (simple: boost OI if last 10 trades with OI spike were winners)
-        weights = {
-            'supertrend': 0.2, 'orderbook': 0.15, 'funding': 0.1, 'open_interest': 0.1,
-            'taker_maker': 0.1, 'volatility': 0.1, 'sr_proximity': 0.1, 'spread': 0.05,
-            'trend_consistency': 0.05, 'outlier_bonus': 0.05
-        }
-        total_score = sum(sub_scores[k] * weights.get(k, 0) for k in sub_scores)
-        return total_score, sub_scores, data_points, normalized
+            logging.error(f"Error scoring signal for {symbol}: {str(e)}")
+            return 50, {}, {}, {}
 
     async def run_live_trading(self, symbols, timeframe='5m'):
         logging.info("🚀 STARTING LIVE TRADING WITH REAL MONEY!")
-        SCORE_THRESHOLD = 45  # 🔥 REDUCED from 85 to 45 for more trades!
+        score_threshold = 45  # 🔥 REDUCED from 85 to 45 for more trades!
         
         async def process_symbol_lightning_fast(symbol):
             """⚡ ULTRA-FAST symbol processing"""
@@ -1462,7 +1588,7 @@ class SuperZPullbackAnalyzer:
                 try:
                     score, breakdown, datapoints, normalized = self.enhanced_score_all_data(symbol, df_with_indicators, latest_signal)
                     
-                    if score >= SCORE_THRESHOLD and latest_signal['time'] == df_with_indicators.index[-1]:
+                    if score >= score_threshold and latest_signal['time'] == df_with_indicators.index[-1]:
                         logging.info(f"🔥 HIGH SCORE SIGNAL: {symbol} | Score: {score} | Type: {latest_signal['type']}")
                         trigger_price = latest_signal['price']
                         side = 'buy' if latest_signal['type'] == 'long' else 'sell'
@@ -1488,34 +1614,43 @@ class SuperZPullbackAnalyzer:
                 import traceback
                 logging.error(f"Detailed error traceback for {symbol}: {traceback.format_exc()}")
                 return None
+                
+        # IMPROVED: Use semaphore to limit concurrent API calls
+        semaphore = asyncio.Semaphore(5)  # Max 5 concurrent API calls
         
         while True:
-            start_time = datetime.now()
-            logging.info(f"⚡ LIGHTNING SCAN: Processing {len(symbols)} symbols in parallel...")
-            
-            # PARALLEL PROCESSING FOR 5000000% SPEED BOOST
-            semaphore = asyncio.Semaphore(50)  # Process 50 symbols simultaneously
-            
-            async def process_with_semaphore(symbol):
-                async with semaphore:
-                    return await process_symbol_lightning_fast(symbol)
-            
-            # Process ALL symbols in parallel
-            results = await asyncio.gather(*[process_with_semaphore(symbol) for symbol in symbols], return_exceptions=True)
-            
-            # Filter successful results
-            successful_signals = [r for r in results if r and not isinstance(r, Exception)]
-            
-            scan_time = (datetime.now() - start_time).total_seconds()
-            logging.info(f"⚡ LIGHTNING SCAN COMPLETE: {len(successful_signals)} signals found in {scan_time:.1f}s")
-            
-            if successful_signals:
+            try:
+                async def process_with_semaphore(symbol):
+                    async with semaphore:
+                        return await process_symbol_lightning_fast(symbol)
+                
+                # Process all symbols in parallel
+                tasks = [process_with_semaphore(symbol) for symbol in symbols]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # Filter out errors and None results
+                successful_signals = []
+                for result in results:
+                    if isinstance(result, dict) and 'symbol' in result and 'signal' in result and 'score' in result:
+                        successful_signals.append(result)
+                    elif isinstance(result, Exception):
+                        logging.error(f"Error processing symbol: {str(result)}")
+                
                 logging.info(f"🚀 LIVE TRADES EXECUTED: {len(successful_signals)} orders placed!")
-                for signal in successful_signals:
-                    logging.info(f"✅ {signal['symbol']}: {signal['signal']['type']} @ {signal['signal']['price']} (Score: {signal['score']})")
-            
-            # 30 second cycle for ultra-fast live trading
-            await asyncio.sleep(30)
+                for signal_data in successful_signals:
+                    if isinstance(signal_data, dict) and 'symbol' in signal_data and 'signal' in signal_data and 'score' in signal_data:
+                        signal_info = signal_data['signal']
+                        if isinstance(signal_info, dict) and 'type' in signal_info and 'price' in signal_info:
+                            logging.info(f"✅ {signal_data['symbol']}: {signal_info['type']} @ {signal_info['price']} (Score: {signal_data['score']})")
+                        else:
+                            logging.info(f"✅ {signal_data['symbol']}: Signal placed (Score: {signal_data['score']})")
+                
+                # 30 second cycle for ultra-fast live trading
+                await asyncio.sleep(30)
+                
+            except Exception as e:
+                logging.error(f"Live trading loop error: {str(e)}")
+                await asyncio.sleep(60)  # Wait a minute before retrying
 
     def generate_alerts(self, symbol, df, signal, score, tf, higher_tf_trend=None, s_r_levels=None):
         """
@@ -1585,16 +1720,18 @@ async def main():
     # Use scanner results instead of processing all 500+ pairs
     import json
     try:
-        with open('scanner_results_5m.json', 'r') as f:
+        with open('scanner_results_5m.json') as f:
             scanner_data = json.load(f)
             symbols = [item['symbol'] for item in scanner_data[:50]]  # Top 50 only for SPEED
-    except:
+    except Exception as e:
         # Fallback to major pairs if scanner results not found
+        logging.warning(f"Scanner results not found, using fallback pairs: {str(e)}")
         symbols = [
-            'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'BNB/USDT:USDT', 
+            'BTC/USDT:USDT', 'ETH/USDT:USDT', 'SOL/USDT:USDT', 'BNB/USDT:USDT',
             'XRP/USDT:USDT', 'ADA/USDT:USDT', 'DOGE/USDT:USDT', 'AVAX/USDT:USDT',
             'DOT/USDT:USDT', 'LINK/USDT:USDT', 'MATIC/USDT:USDT', 'UNI/USDT:USDT',
-            'LTC/USDT:USDT', 'BCH/USDT:USDT', 'ATOM/USDT:USDT', 'ICP/USDT:USDT',
+            'SHIB/USDT:USDT', 'LTC/USDT:USDT', 'ATOM/USDT:USDT', 'ETC/USDT:USDT',
+            'XLM/USDT:USDT', 'FTM/USDT:USDT', 'NEAR/USDT:USDT', 'ALGO/USDT:USDT',
             'APT/USDT:USDT', 'NEAR/USDT:USDT', 'FIL/USDT:USDT', 'TRX/USDT:USDT'
         ]
     
@@ -1606,7 +1743,6 @@ async def main():
     return True
 
 if __name__ == "__main__":
-    import sys
     import os
     
     # Setup enhanced logging

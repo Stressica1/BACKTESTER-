@@ -1,13 +1,41 @@
-ccxt>=4.1.0
-pandas>=2.0.0
-numpy>=1.24.0
-asyncio
-python-dotenv>=1.0.0
-aiohttp>=3.8.0
-websockets>=11.0.0
-ta>=0.10.0
-tqdm>=4.65.0
-prettytable>=3.0.0
-psutil>=5.9.0
-ratelimit>=2.2.1
-watchdog>=3.0.0 
+# Trading Bot Dependencies
+ccxt>=3.0.0  # Cryptocurrency exchange API
+numpy>=1.20.0  # Numerical calculations
+pandas>=1.3.0  # Data analysis
+aiohttp>=3.8.0  # Async HTTP requests
+websockets>=10.0  # WebSocket client
+requests>=2.26.0  # HTTP requests
+
+# Performance & Concurrency
+asyncio>=3.4.3  # Async programming
+aiolimiter>=1.0.0  # Rate limiting
+
+# Utilities
+python-dotenv>=0.19.0  # Environment variables
+watchdog>=2.1.6  # File system monitoring
+colorama>=0.4.4  # Terminal colors
+tqdm>=4.62.0  # Progress bars
+pytz>=2021.3  # Timezone support
+
+# Data Storage
+sqlalchemy>=1.4.0  # Database ORM
+sqlite3-api>=0.1.0  # SQLite API
+
+# Technical Analysis
+ta>=0.10.0  # Technical analysis indicators
+
+# Optimization
+bottleneck>=1.3.2  # Performance optimization
+numba>=0.54.0  # JIT compilation
+
+# Visualization (optional)
+matplotlib>=3.4.0  # Plotting
+seaborn>=0.11.0  # Statistical visualization
+
+# Testing
+pytest>=6.2.5  # Testing framework
+pytest-asyncio>=0.18.0  # Async testing
+
+# Deployment
+schedule>=1.1.0  # Job scheduling
+python-daemon>=2.3.0  # Daemon processes 
