@@ -804,6 +804,53 @@ class BitgetErrorManager:
             
         return stats
 
+    # Handle price deviation errors (50067)
+    async def handle_price_deviation_error(self, exchange, symbol, side, retry_count, context=None):
+        """Handle price deviation error (50067) by using market orders instead of limit orders"""
+        logger.warning(f"⚠️ Price deviation error (50067) - retrying with market order. Context: {symbol} {side} {context}")
+        
+        try:
+            # Get current market price from exchange
+            await asyncio.sleep(0.5)  # Small delay for rate limiting
+            ticker = await exchange.fetch_ticker(symbol)
+            current_price = ticker.get('last', ticker.get('close', 0))
+            
+            # Get index price if possible (more reliable for futures)
+            index_price = None
+            try:
+                markets = await exchange.fetch_markets()
+                for market in markets:
+                    if market['symbol'] == symbol and 'info' in market:
+                        index_price = float(market['info'].get('indexPrice', 0))
+                        break
+            except Exception as e:
+                logger.debug(f"Could not fetch index price: {e}")
+            
+            # Use the index price if available, otherwise market price
+            reference_price = index_price if index_price else current_price
+            
+            # Log the price information
+            logger.info(f"🔄 Using market order for {symbol} due to price deviation (price: {current_price}, index: {index_price})")
+            
+            # Return true to retry with market orders
+            return True, {
+                'use_market_order': True,
+                'current_price': current_price,
+                'index_price': index_price,
+                'reference_price': reference_price
+            }
+        
+        except Exception as e:
+            logger.error(f"Error handling price deviation: {e}")
+            return False, None
+
+    # Handle specific error codes
+    async def handle_error_code(self, error_code, error_message, exchange, symbol=None, side=None, retry_count=0, context=None):
+        """Handle specific Bitget error codes with appropriate strategies"""
+        if error_code == '50067' or 'price deviates' in error_message.lower():
+            # Price deviation error - use market order
+            return await self.handle_price_deviation_error(exchange, symbol, side, retry_count, context)
+
 # Create singleton instance
 _error_manager = None
 
